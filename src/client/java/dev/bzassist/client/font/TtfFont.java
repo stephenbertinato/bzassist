@@ -12,6 +12,7 @@ import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.util.freetype.FT_Bitmap;
 import org.lwjgl.util.freetype.FT_Face;
 import org.lwjgl.util.freetype.FT_GlyphSlot;
+import org.lwjgl.util.freetype.FT_Vector;
 import org.lwjgl.util.freetype.FreeType;
 
 /**
@@ -103,6 +104,34 @@ public final class TtfFont {
 
 		public float lineHeight() {
 			return face.height() / 64.0F;
+		}
+
+		/**
+		 * The font's own kerning adjustment between two codepoints, in pixels. Without this every pair
+		 * is spaced by its advance alone, which is why letter pairs like "AV", "To" and "ry" look
+		 * uneven compared with real typesetting.
+		 */
+		public float kerning(int left, int right) {
+			int leftIndex = FreeType.FT_Get_Char_Index(face, left);
+			int rightIndex = FreeType.FT_Get_Char_Index(face, right);
+
+			if (leftIndex == 0 || rightIndex == 0) {
+				return 0.0F;
+			}
+
+			FT_Vector vector = FT_Vector.malloc();
+
+			try {
+				if (FreeType.FT_Get_Kerning(face, leftIndex, rightIndex, FreeType.FT_KERNING_DEFAULT, vector) != 0) {
+					return 0.0F;
+				}
+
+				return vector.x() / 64.0F;
+			} catch (RuntimeException exception) {
+				return 0.0F;
+			} finally {
+				vector.free();
+			}
 		}
 
 		/** Rasterises a codepoint, or returns {@code null} when the font has no glyph for it. */

@@ -419,6 +419,16 @@ public final class GuideEngine {
 
 	private static Step product(BazaarView view, String name, int held, int need) {
 		if (need > 0) {
+			double cost = need * targetBuyPrice;
+			double purse = ProfileState.purseKnown() ? ProfileState.purse() : -1.0;
+
+			if (purse >= 0.0 && cost > purse) {
+				return new Step("Not enough coins",
+						"this order is " + Coins.compact(cost) + ", you have " + Coins.compact(purse)
+								+ " · /bzassist best",
+						-1, false, "");
+			}
+
 			return slot(view, "Create Buy Order", "buy " + need + " " + name);
 		}
 

@@ -384,33 +384,84 @@ public final class SummaryScreen extends Screen {
 		return text.length() <= limit ? text : text.substring(0, limit - 1) + "...";
 	}
 
+	/**
+	 * A rounded rectangle drawn with anti-aliased corners: the straight middle is one fill, and each row
+	 * through a corner is drawn with partial coverage on its first and last pixel. That is what turns the
+	 * staircase of one-fill-per-row into a single smooth curve at any radius.
+	 */
 	private static void rounded(GuiGraphicsExtractor graphics, float x0, float y0, float x1, float y1,
 			float radius, int color) {
-		int left = Math.round(x0);
+		if (x1 <= x0 || y1 <= y0) {
+			return;
+		}
+
+		float r = Math.max(0.0F, Math.min(radius, Math.min((x1 - x0) / 2.0F, (y1 - y0) / 2.0F)));
+
+		if (r < 0.75F) {
+			graphics.fill(Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1), color);
+			return;
+		}
+
 		int top = Math.round(y0);
-		int right = Math.round(x1);
 		int bottom = Math.round(y1);
+		int rows = (int) Math.ceil(r);
+		int middleTop = Math.round(y0 + r);
+		int middleBottom = Math.round(y1 - r);
 
-		if (right <= left || bottom <= top) {
-			return;
+		if (middleBottom > middleTop) {
+			graphics.fill(Math.round(x0), middleTop, Math.round(x1), middleBottom, color);
 		}
 
-		int r = Math.min(Math.round(radius), Math.min((right - left) / 2, (bottom - top) / 2));
+		for (int i = 0; i < rows; i++) {
+			int topRow = top + i;
+			int bottomRow = bottom - 1 - i;
 
-		if (r <= 0) {
-			graphics.fill(left, top, right, bottom, color);
-			return;
-		}
+			if (topRow >= middleTop && bottomRow < middleBottom) {
+				break;
+			}
 
-		graphics.fill(left, top + r, right, bottom - r, color);
-
-		for (int i = 0; i < r; i++) {
 			double dy = r - i - 0.5;
-			int inset = r - (int) Math.round(Math.sqrt(Math.max(0.0, r * (double) r - dy * dy)));
-			graphics.fill(left + inset, top + i, right - inset, top + i + 1, color);
-			graphics.fill(left + inset, bottom - i - 1, right - inset, bottom - i, color);
+			double inset = r - Math.sqrt(Math.max(0.0, (double) r * r - dy * dy));
+			float left = x0 + (float) inset;
+			float right = x1 - (float) inset;
+
+			if (topRow < middleTop) {
+				row(graphics, left, right, topRow, color);
+			}
+
+			if (bottomRow >= middleBottom) {
+				row(graphics, left, right, bottomRow, color);
+			}
 		}
 	}
+
+	/** One scanline of a rounded rectangle, with fractional coverage at both ends. */
+	private static void row(GuiGraphicsExtractor graphics, float left, float right, int y, int color) {
+		if (right <= left) {
+			return;
+		}
+
+		int l = (int) Math.floor(left);
+		int rr = (int) Math.floor(right);
+
+		if (l == rr) {
+			graphics.fill(l, y, l + 1, y + 1, alpha(color, right - left));
+			return;
+		}
+
+		float leftCoverage = l + 1 - left;
+		float rightCoverage = right - rr;
+		graphics.fill(l, y, l + 1, y + 1,
+				leftCoverage >= 0.995F ? color : alpha(color, leftCoverage));
+
+		if (rr > l + 1) {
+			graphics.fill(l + 1, y, rr, y + 1, color);
+		}
+
+		graphics.fill(rr, y, rr + 1, y + 1,
+				rightCoverage >= 0.995F ? color : alpha(color, rightCoverage));
+	}
+
 
 	private static int alpha(int color, float value) {
 		int base = (color >>> 24) & 0xFF;

@@ -103,7 +103,9 @@ Collect, in this order:
 
 1. What you did and what happened instead (one line is enough).
 2. The session report file for that session — it has every step, screen and chat line the mod saw.
-3. `/bzassist dump` output if a slot was highlighted wrongly.
-4. `/bzassist profile` output.
+3. `/bzassist orders` output if an existing order was not relisted — it prints every row it parsed, the
+   price it read, and the reason it is or is not being moved.
+4. `/bzassist dump` output if a slot was highlighted wrongly.
+5. `/bzassist profile` output (purse in particular — sizing is capped by it).
 
 That is enough to fix almost anything without reproducing it.

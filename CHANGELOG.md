@@ -3,6 +3,25 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.1.1] - 2026-11-23
+
+### Fixed
+
+- Orders that were already listed were still not relisted. The reader now resolves a row's product from
+  its name, then from its lore when the name alone does not match, and every row is compared with the
+  live book by its unit price. `/bzassist orders` prints what was parsed, the price it read, and the exact
+  reason each order is or is not being moved — paste its output if a relist still does not happen.
+- The purse was a sizing hint, not a limit: with 0 coins it still proposed orders worth millions. Sizing
+  now refuses a flip the purse cannot pay for, the two-unit floor only applies when two units are
+  affordable, and the guide stops with `Not enough coins` instead of walking into a refused order.
+
+### Changed
+
+- Text now uses the font's own kerning pairs and lands glyphs on whole device pixels, which removes the
+  uneven spacing between letter pairs and the soft, grainy look.
+- Rounded corners are anti-aliased: each scanline through a corner is drawn with fractional coverage at
+  both ends instead of a whole-pixel staircase, so the card has one smooth outline.
+
 ## [1.1.0] - 2026-11-23
 
 The first published build, and the one that made the HUD and the session report worth looking at.

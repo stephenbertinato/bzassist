@@ -211,12 +211,29 @@ public final class FlipSession {
 
 			if (id == null) {
 				// The row name can be a form the screen index does not carry ("Enchanted Book (Smoldering
-				// VI)"); fall back to the canonical name lookup before giving up on the row.
+				// VI)", or a coop row that prefixes a name); try the canonical lookup, then the lore.
 				id = ItemNames.idFor(slot.name());
 			}
 
 			if (id == null) {
-				SessionLog.event("orders", "unreadable row: '" + slot.name() + "'");
+				int checked = 0;
+
+				for (String line : slot.lore()) {
+					if (checked++ >= 6) {
+						break;
+					}
+
+					id = ItemNames.idFor(line);
+
+					if (id != null) {
+						break;
+					}
+				}
+			}
+
+			if (id == null) {
+				SessionLog.event("orders", "unreadable row: '" + slot.name() + "' | "
+						+ (slot.lore().isEmpty() ? "no lore" : slot.lore().get(0)));
 				continue;
 			}
 
@@ -428,48 +445,86 @@ public final class FlipSession {
 	 * spend limit you do not have) and a one-minute cooldown per order (never cancel-loop).</p>
 	 */
 	private static boolean needsRelist(OwnOrder order) {
+		return relistReason(order) == null;
+	}
+
+	/**
+	 * Why this order should not be relisted, or {@code null} when it should. Every branch is reported, so
+	 * `/bzassist orders` and the session report can answer "why didn't it move my order?" without a guess.
+	 */
+	private static String relistReason(OwnOrder order) {
 		BazaarProduct product = BazaarApi.snapshot().get(order.id());
 
 		if (product == null) {
-			SessionLog.event("relist", order.name() + ": no live data, cannot judge");
-			return false;
+			return "no live data for " + order.id() + ", cannot judge";
 		}
 
-		if (order.price() <= 0.0 || order.open() <= 0) {
-			SessionLog.event("relist", order.name() + ": price/quantity unreadable (" + order.price() + ")");
-			return false;
+		if (order.price() <= 0.0) {
+			return "price unreadable on the row";
+		}
+
+		if (order.open() <= 0) {
+			return "nothing left open (fully filled)";
 		}
 
 		double best = order.sellSide() ? product.bestAsk() : product.bestBid();
 
 		if (best <= 0.0) {
-			return false;
+			return "the book has no " + (order.sellSide() ? "ask" : "bid") + " price";
 		}
 
 		boolean behind = order.sellSide() ? order.price() > best : order.price() < best;
 
 		if (!behind) {
-			return false;
+			return String.format(Locale.ROOT, "already at the front (%.1f vs %.1f)", order.price(), best);
 		}
 
 		String key = order.id() + (order.sellSide() ? "|sell" : "|buy");
 		Long last = LAST_RELISTED.get(key);
 
 		if (last != null && System.currentTimeMillis() - last < RELIST_COOLDOWN_MS) {
-			return false;
+			return "relisted less than a minute ago";
 		}
 
 		double cost = order.open() * Math.max(1.0, order.price());
 
 		if (ProfileState.dailyLimitRemaining() < cost) {
-			SessionLog.event("relist", order.name() + ": behind the book but no limit left to move it");
-			return false;
+			return "not enough daily limit left to move it";
 		}
 
 		LAST_RELISTED.put(key, System.currentTimeMillis());
 		SessionLog.event("relist", String.format(Locale.ROOT, "%s %s %.1f vs book %.1f · %d open",
 				order.name(), order.sellSide() ? "undercut" : "overbid", order.price(), best, order.open()));
-		return true;
+		return null;
+	}
+
+	/** Everything the order reader parsed, plus the relist verdict for each row. Used by `/bzassist orders`. */
+	public static List<String> describeOrders() {
+		List<String> lines = new ArrayList<>();
+		BazaarView view = BazaarScreenReader.view();
+		lines.add("screen: " + view.kind() + " '" + view.title() + "' with " + view.slots().size() + " slots");
+		lines.add("parsed: " + own.size() + " order(s)");
+
+		if (own.isEmpty()) {
+			int shown = 0;
+
+			for (BazaarView.SlotView slot : view.slots()) {
+				if (shown++ >= 4) {
+					break;
+				}
+
+				lines.add("row: '" + slot.name() + "' -> " + ItemNames.idForScreenName(slot.name()));
+			}
+		}
+
+		for (OwnOrder order : own) {
+			String reason = relistReason(order);
+			lines.add(String.format(Locale.ROOT, "%s %s @%.1f %d/%d -> %s",
+					order.sellSide() ? "SELL" : "BUY", order.name(), order.price(), order.filled(), order.total(),
+					reason == null ? "RELIST" : reason));
+		}
+
+		return lines;
 	}
 
 	private static String worthWaitingNote(OwnOrder order) {
@@ -594,6 +649,14 @@ public final class FlipSession {
 
 		for (Flip flip : FlipEngine.rank(12)) {
 			if (ordered(flip.id())) {
+				continue;
+			}
+
+			// Never propose an order the purse cannot pay for.
+			if (ProfileState.purseKnown()
+					&& flip.quantity() * flip.buyPrice() > ProfileState.purse()) {
+				SessionLog.event("place", flip.name() + ": " + Coins.compact(flip.quantity() * flip.buyPrice())
+						+ " is more than the purse");
 				continue;
 			}
 

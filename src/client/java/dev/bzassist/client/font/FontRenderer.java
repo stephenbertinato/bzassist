@@ -61,6 +61,7 @@ public final class FontRenderer {
 		Quads quads = new Quads();
 		float penX = x;
 		float penY = baselineY;
+		int previous = -1;
 		float minX = Float.MAX_VALUE;
 		float minY = Float.MAX_VALUE;
 		float maxX = -Float.MAX_VALUE;
@@ -73,9 +74,15 @@ public final class FontRenderer {
 			if (codepoint == '\n') {
 				penX = x;
 				penY += face.lineHeight() * toGui;
+				previous = -1;
 				continue;
 			}
 
+			if (previous >= 0) {
+				penX += face.kerning(previous, codepoint) * toGui;
+			}
+
+			previous = codepoint;
 			GlyphAtlas.Region region = atlas.region(face, codepoint);
 
 			if (region == null) {
@@ -83,8 +90,12 @@ public final class FontRenderer {
 			}
 
 			if (region.width() > 0 && region.height() > 0) {
-				float x0 = penX + region.left() * toGui;
-				float y0 = penY - region.top() * toGui;
+				// Land the glyph on whole device pixels: a glyph drawn at a fractional position is
+				// resampled by the texture filter and comes out soft.
+				float snappedX = Math.round(penX * guiScale) / (float) guiScale;
+				float snappedY = Math.round(penY * guiScale) / (float) guiScale;
+				float x0 = snappedX + region.left() * toGui;
+				float y0 = snappedY - region.top() * toGui;
 				float x1 = x0 + region.width() * toGui;
 				float y1 = y0 + region.height() * toGui;
 				quads.add(x0, y0, x1, y1, region.u0(), region.v0(), region.u1(), region.v1());
@@ -141,10 +152,17 @@ public final class FontRenderer {
 		float toGui = 1.0F / guiScale;
 		float width = 0.0F;
 		int glyphs = 0;
+		int previous = -1;
 
 		for (int i = 0; i < text.length(); ) {
 			int codepoint = text.codePointAt(i);
 			i += Character.charCount(codepoint);
+
+			if (previous >= 0) {
+				width += face.kerning(previous, codepoint) * toGui;
+			}
+
+			previous = codepoint;
 			TtfFont.Glyph glyph = face.glyph(codepoint);
 
 			if (glyph != null) {

@@ -51,6 +51,7 @@ public final class BazaarCommands {
 													StringArgumentType.getString(context, "item")))))
 							.then(ClientCommands.literal("profile").executes(context -> profile(context.getSource())))
 							.then(ClientCommands.literal("session").executes(context -> session(context.getSource())))
+							.then(ClientCommands.literal("orders").executes(context -> orders(context.getSource())))
 							.then(ClientCommands.literal("summary").executes(context -> summary(context.getSource())))
 							.then(ClientCommands.literal("dev")
 									.then(ClientCommands.literal("summary")
@@ -110,6 +111,7 @@ public final class BazaarCommands {
 		send(source, "/bzassist selftest", "check the parsing and formatting code");
 		send(source, "/bzassist session", "where the last session report was written");
 		send(source, "/bzassist daily [reset]", "daily order-value limit left; reset it by hand");
+		send(source, "/bzassist orders", "what the order reader parsed, and why each is or is not relisted");
 		send(source, "/bzassist summary", "the last session's summary");
 		send(source, "/bzassist dev summary", "show an example summary");
 		send(source, "/bzassist dump", "what the scanner sees now");
@@ -291,6 +293,17 @@ public final class BazaarCommands {
 		}
 
 		return ok ? 0 : 1;
+	}
+
+	/** Everything the order reader sees, and its relist verdict for each row. */
+	private static int orders(FabricClientCommandSource source) {
+		header(source, "Bazaar orders as read");
+
+		for (String line : FlipSession.describeOrders()) {
+			send(source, line, "");
+		}
+
+		return 1;
 	}
 
 	/** The last session's summary, or a word about there not being one. */

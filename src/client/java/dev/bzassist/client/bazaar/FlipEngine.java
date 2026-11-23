@@ -248,7 +248,15 @@ public final class FlipEngine {
 			return null;
 		}
 
-		double purse = ProfileState.purseKnown() ? ProfileState.purse() : 1_000_000.0;
+		// The purse is a hard limit, not a hint. When the scoreboard shows it, nothing is proposed that the
+		// player cannot pay for; when it is unknown the old cautious default is used instead.
+		boolean purseKnown = ProfileState.purseKnown();
+		double purse = purseKnown ? ProfileState.purse() : 1_000_000.0;
+
+		if (purseKnown && purse < buyPrice) {
+			return null;
+		}
+
 		double maxFillDays = Math.max(1.0 / 24.0, BazaarConfig.maxFillHours() / 24.0);
 
 		// How often rivals re-price against us: the more orders on a side, the shorter the spell we hold
@@ -270,14 +278,18 @@ public final class FlipEngine {
 		double bookCap = Math.max(1.0,
 				Math.min(product.quantityAtBid(), product.quantityAtAsk()) * TOP_LEVEL_SHARE);
 
-		// At least one unit: a slow mover with a wide margin is still worth one order, and dropping it
-		// entirely is how high-value enchantments used to go missing.
-		long units = Math.max(1L, (long) Math.floor(
-				Math.min(Math.min(affordable, holdable), Math.min(clearable, Math.min(bookCap, coinCap)))));
+		long units = (long) Math.floor(
+				Math.min(Math.min(affordable, holdable), Math.min(clearable, Math.min(bookCap, coinCap))));
 
+		// The two-unit floor only applies when two units are actually affordable.
 		if (units < MIN_UNITS_HIGH_MARGIN && margin / buyPrice >= 0.10
-				&& Math.min(flowIntoBids, flowFromAsks) >= MIN_UNITS_HIGH_MARGIN) {
+				&& Math.min(flowIntoBids, flowFromAsks) >= MIN_UNITS_HIGH_MARGIN
+				&& affordable >= MIN_UNITS_HIGH_MARGIN) {
 			units = MIN_UNITS_HIGH_MARGIN;
+		}
+
+		if (units < 1L) {
+			return null;
 		}
 
 		units = Math.min(units, product.id().startsWith("ESSENCE_") ? MAX_ESSENCE_UNITS : MAX_ORDER_UNITS);
