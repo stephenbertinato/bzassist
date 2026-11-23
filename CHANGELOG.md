@@ -3,6 +3,14 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.0] - 2026-11-23
+
+### Added
+
+- `/bzassist relist`: a relist-only pass. It reads `/managebazaarorders`, moves whatever is behind the
+  book, and stops — nothing is bought, sold or placed, and the previous session's summary is left alone.
+  `/bzassist orders` is the read-only dry run that prints the verdict for every row first.
+
 ## [1.1.1] - 2026-11-23
 
 ### Fixed

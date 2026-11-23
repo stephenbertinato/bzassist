@@ -66,6 +66,8 @@ public final class FlipSession {
 
 	private static Phase lastPhase = Phase.OFF;
 	private static int sampleTicks;
+	/** A relist-only pass stops as soon as every order has been checked, without touching the market. */
+	private static boolean relistOnly;
 	private static volatile Phase phase = Phase.OFF;
 	private static volatile String note = "off";
 	private static final List<OwnOrder> own = new ArrayList<>();
@@ -102,32 +104,57 @@ public final class FlipSession {
 	}
 
 	public static void start() {
+		start(false);
+	}
+
+	/**
+	 * Reads the orders and relists whatever is behind the book, then stops. Nothing is placed, nothing is
+	 * sold, and the previous session's summary is left alone: this is the narrow test of one feature.
+	 */
+	public static void startRelistOnly() {
+		start(true);
+	}
+
+	private static void start(boolean relistOnly) {
 		own.clear();
 		cursor = 0;
 		stashStage = 0;
 		lastPhase = Phase.OFF;
 		sampleTicks = 0;
+		FlipSession.relistOnly = relistOnly;
 		ChatWatch.clear();
 		SessionLog.begin();
-		SessionStats.begin();
+
+		if (!relistOnly) {
+			SessionStats.begin();
+		}
+
 		phase = Phase.SCAN;
-		note = "reading your orders";
-		SessionLog.event("phase", "OFF -> SCAN");
-		BzAssist.LOGGER.info("Flip session started");
+		note = relistOnly ? "relist pass: reading your orders" : "reading your orders";
+		SessionLog.event("phase", "OFF -> SCAN" + (relistOnly ? " (relist only)" : ""));
+		BzAssist.LOGGER.info("Flip session started{}", relistOnly ? " (relist only)" : "");
 	}
 
 	public static void stop() {
 		SessionLog.event("phase", phase + " -> OFF");
-		SessionStats.finish();
+
+		if (!relistOnly) {
+			SessionStats.finish();
+		}
 		SessionLog.finish();
 		ChatWatch.clear();
+		boolean wasRelistOnly = relistOnly;
+		relistOnly = false;
 		phase = Phase.OFF;
 		lastPhase = Phase.OFF;
 		note = "off";
 		own.clear();
 		cursor = 0;
 		BzAssist.LOGGER.info("Flip session stopped");
-		showSummaryIfProfitable();
+
+		if (!wasRelistOnly) {
+			showSummaryIfProfitable();
+		}
 	}
 
 	/** The summary only opens when the session actually made money; a losing session stays quiet. */
@@ -191,6 +218,13 @@ public final class FlipSession {
 		read(view);
 
 		if (own.isEmpty()) {
+			if (relistOnly) {
+				note = "no orders to relist";
+				SessionLog.event("relist", "no orders found in the list");
+				stop();
+				return;
+			}
+
 			phase = Phase.STASH;
 			stashStage = 0;
 			note = "checking the stash";
@@ -346,6 +380,13 @@ public final class FlipSession {
 			note = order.name() + " · " + (order.sellSide() ? "undercut" : "overbid");
 			push(new GuideEngine.Step("Click " + order.name(), "then click Cancel · " + worthWaitingNote(order),
 					row.index(), false, ""));
+			return;
+		}
+
+		if (relistOnly) {
+			note = "relist pass done";
+			SessionLog.event("relist", "pass finished with " + own.size() + " order(s) checked");
+			stop();
 			return;
 		}
 

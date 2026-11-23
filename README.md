@@ -44,6 +44,8 @@ acts on Hypixel SkyBlock.
 | `/bza <item>` | same as `plan`, with tab completion |
 | `/bzassist price <item>` | one product in full detail: both sides, flow, the per-placement limit arithmetic |
 | `/bzassist profile` | purse, inventory, tax, order slots, limit remaining, data age |
+| `/bzassist orders` | every order row the reader parsed, its price, and why it is or is not relisted |
+| `/bzassist relist` | read the orders, relist what is behind the book, then stop (nothing is bought or sold) |
 | `/bzassist dump` | everything the screen scanner currently sees (for bug reports) |
 | `/bzassist session` | where the last session report was written |
 | `/bzassist daily [reset]` | daily order-value limit spent and left, and when it rolls over |

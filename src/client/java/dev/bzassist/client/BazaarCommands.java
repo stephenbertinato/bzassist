@@ -52,6 +52,7 @@ public final class BazaarCommands {
 							.then(ClientCommands.literal("profile").executes(context -> profile(context.getSource())))
 							.then(ClientCommands.literal("session").executes(context -> session(context.getSource())))
 							.then(ClientCommands.literal("orders").executes(context -> orders(context.getSource())))
+							.then(ClientCommands.literal("relist").executes(context -> relist(context.getSource())))
 							.then(ClientCommands.literal("summary").executes(context -> summary(context.getSource())))
 							.then(ClientCommands.literal("dev")
 									.then(ClientCommands.literal("summary")
@@ -112,6 +113,7 @@ public final class BazaarCommands {
 		send(source, "/bzassist session", "where the last session report was written");
 		send(source, "/bzassist daily [reset]", "daily order-value limit left; reset it by hand");
 		send(source, "/bzassist orders", "what the order reader parsed, and why each is or is not relisted");
+		send(source, "/bzassist relist", "read your orders and relist what is behind the book, then stop");
 		send(source, "/bzassist summary", "the last session's summary");
 		send(source, "/bzassist dev summary", "show an example summary");
 		send(source, "/bzassist dump", "what the scanner sees now");
@@ -293,6 +295,13 @@ public final class BazaarCommands {
 		}
 
 		return ok ? 0 : 1;
+	}
+
+	/** A relist-only pass: read the orders, move what is behind the book, stop. Nothing is placed or sold. */
+	private static int relist(FabricClientCommandSource source) {
+		FlipSession.startRelistOnly();
+		send(source, "relist", "armed — it reads your orders and relists only what is behind the book");
+		return 1;
 	}
 
 	/** Everything the order reader sees, and its relist verdict for each row. */

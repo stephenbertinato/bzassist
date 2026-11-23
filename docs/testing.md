@@ -77,6 +77,16 @@ Use something cheap you do not mind owning.
 - [ ] Place step: with free order slots, a new item is proposed with a full click chain.
 - [ ] Press `F6` again to stop.
 
+## 7b. Relisting on its own
+
+- [ ] Open `/managebazaarorders` so the order list is on screen.
+- [ ] `/bzassist orders` → one line per row: `BUY <item> @<unit price> <filled>/<total> -> RELIST` or the
+      reason it will not move. **Nothing is clicked.** If it says `parsed: 0 order(s)`, the following
+      `row:` lines show the names the reader saw and what they resolved to — send that along.
+- [ ] `/bzassist relist` → a relist-only pass: it reads the list, walks you through cancel → Cancel for
+      each order that is behind, and stops when it is done. No buying, no selling.
+- [ ] The session report (`/bzassist session`) has `[relist]` lines for every decision.
+
 ## 8. The summary screen
 
 - [ ] `/bzassist dev summary` → the example summary opens: four stat cards, the profit chart, best and
