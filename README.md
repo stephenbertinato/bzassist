@@ -145,6 +145,8 @@ and refuses a tag that disagrees with `gradle.properties`. Every push also runs 
 - [docs/fonts.md](docs/fonts.md) — the FreeType text renderer and why MSDF was dropped.
 - [docs/improvements.md](docs/improvements.md) — the roadmap: what to build next, in order, with effort.
 - [docs/testing.md](docs/testing.md) — a step-by-step checklist that exercises every feature.
+- [docs/data-requirements.md](docs/data-requirements.md) — every screen title, slot label, lore line and
+  chat line the mod depends on, and the one file that captures them all.
 - [CHANGELOG.md](CHANGELOG.md) — what changed, and the known limitations of this release.
 
 ## Layout
