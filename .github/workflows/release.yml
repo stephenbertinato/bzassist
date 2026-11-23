@@ -1,0 +1,46 @@
+# Builds the mod on a version tag and attaches the jar to a GitHub release.
+#
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# The version in gradle.properties should match the tag; the workflow fails the release if it does not,
+# so a jar can never be published under the wrong number.
+
+name: release
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+      - name: validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+      - name: setup jdk
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'microsoft'
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+      - name: check the tag matches the mod version
+        run: |
+          version="$(grep -E '^version=' gradle.properties | cut -d= -f2 | tr -d ' ')"
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match version ${version} in gradle.properties" >&2
+            exit 1
+          fi
+      - name: build
+        run: ./gradlew build
+      - name: publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/libs/bzassist-*.jar
+          generate_release_notes: true
+          fail_on_unmatched_files: true

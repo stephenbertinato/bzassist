@@ -1,0 +1,38 @@
+{
+	"schemaVersion": 1,
+	"id": "bzassist",
+	"version": "${version}",
+	"name": "BzAssist",
+	"description": "A step-by-step Hypixel SkyBlock bazaar flipping assistant: ranks flips from the live order book, then highlights the exact slot and pre-fills the exact numbers for every order. It never clicks for you.",
+	"authors": [
+		"stephen"
+	],
+	"contact": {},
+	"license": "CC0-1.0",
+	"icon": "assets/bzassist/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"main": [
+			"dev.bzassist.BzAssist"
+		],
+		"client": [
+			"dev.bzassist.client.BzAssistClient"
+		]
+	},
+	"mixins": [
+		"bzassist.mixins.json",
+		{
+			"config": "bzassist.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"modmenu": "*"
+	}
+}

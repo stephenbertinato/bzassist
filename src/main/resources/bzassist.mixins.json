@@ -1,0 +1,14 @@
+{
+	"required": true,
+	"package": "dev.bzassist.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"BzAssistMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}
