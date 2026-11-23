@@ -504,22 +504,12 @@ public final class GuideEngine {
 
 	/** Preset quantities where they exist; otherwise the custom amount sign, which is filled in for you. */
 	/**
-	 * Quantity presets differ per product — books offer "Get me a stack", essence offers "Buy 50!",
-	 * "Buy 100!", "Buy 500!" — so the exact number is matched against whatever the screen actually has,
-	 * and anything else goes through the custom amount sign, which is filled in for you.
+	 * Always the custom amount sign, never a preset. Presets differ per product (`Buy only one!`,
+	 * `Buy 4!`, `Buy 32!`, `Buy 50!` …), and clicking one orders a number the flip maths did not choose.
+	 * The sign opens with the amount already typed in, so this is still a single click plus Done.
 	 */
 	private static Step quantity(BazaarView view, String name, int need) {
-		for (BazaarView.SlotView slot : view.slots()) {
-			Matcher digits = DIGITS.matcher(slot.name());
-			int offered = digits.find() ? parse(digits.group(1))
-					: slot.name().toLowerCase(Locale.ROOT).contains("only one") ? 1 : -1;
-
-			if (offered == need) {
-				return new Step(slot.name(), "buy " + need + " " + name, slot.index(), false, "");
-			}
-		}
-
-		return slotOr(view, "Custom Amount", "Custom", "amount " + need + " is typed in for you");
+		return slotOr(view, "Custom Amount", null, need + "x " + name + " is typed in for you");
 	}
 
 	private static Step price(BazaarView view, String name, int need) {

@@ -3,6 +3,17 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.7] - 2026-11-23
+
+### Changed
+
+- The quantity step always uses **`Custom Amount`**, never a preset. Presets differ per product
+  (`Buy only one!`, `Buy 4!`, `Buy 32!`, `Buy 50!` …) and clicking one ordered a number the flip maths did
+  not choose; the sign opens pre-filled with the exact amount, so it is still one click and Done.
+- Slot names confirmed against the game and recorded: `Go Back`, `Close`, `Create Buy Order`,
+  `Create Sell Offer`, `Custom Amount`, `Custom Price`, `Top Order +0.1`, `Same As Top Order`,
+  `Best Offer -0.1`, `Claim All Coins`, `Cancel Order`.
+
 ## [1.2.6] - 2026-11-23
 
 Everything here came out of a real `debug.jsonl` capture, not a guess.

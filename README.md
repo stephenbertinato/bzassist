@@ -15,7 +15,7 @@ what is highlighted. That is deliberate: it keeps your account safe and keeps yo
   margin, flow and book-depth filters, and a 15B daily order-value model that charges every placement
   and every relist.
 - **Guides the clicks**: `/bzassist plan <item>` highlights the exact slot for each step — create the
-  buy order, pick the preset quantity or the custom-amount sign (pre-filled), pick `Top Order +0.1`,
+  buy order, open `Custom Amount` (the sign is pre-filled with the amount), pick `Top Order +0.1`,
   confirm; then claim, `Create Sell Offer`, `Best Offer -0.1`, confirm.
 - **Runs a session** (F6): scans `/managebazaarorders`, finds orders that have been outbid or undercut,
   decides whether relisting is worth the limit it costs, collects the stash, lists what has filled, and

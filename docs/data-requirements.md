@@ -42,8 +42,8 @@ Screens missing from the capture are listed at the end.
 ### Slot names
 
 - Product page: `Buy Instantly`, `Sell Instantly`, the product itself, `Create Buy Order`, `Create Sell Offer`
-- Quantity: `Buy only one!`, `Buy 4!`, `Buy 32!`, `Custom Amount` (lore: `Buy up to 256x.`) — the presets
-  differ per item
+- Quantity: `Custom Amount` (lore: `Buy up to 256x.`). The presets (`Buy only one!`, `Buy 4!`, `Buy 32!`,
+  `Buy 50!` …) differ per item and are never clicked: the guide always opens the sign, pre-filled.
 - Price, buy: `Same as Top Order`, `Top Order +0.1`, `5% of Spread`, `Custom Price`
 - Price, sell: `Same as Best Offer`, `Best Offer -0.1`, `10% of Spread`, `Custom Price`
 - Confirm: `Buy Order` / `Sell Offer`
