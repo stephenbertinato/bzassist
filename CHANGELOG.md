@@ -3,50 +3,64 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] - 2026-11-23
+
+The first published build, and the one that made the HUD and the session report worth looking at.
 
 ### Added
 
-- Session reports: every session streams a full timestamped record to `config/bzassist/sessions/` —
-  config and profile at start, phase changes, every instruction, every container the scanner read,
-  every chat line, feed updates and failures, a state sample every five seconds, and every exception
-  the mod caught. Closed with a summary; `/bzassist session` prints the path.
-- `/bzassist session` and `session` help entry.
+- **Session summary screen**: opens when a session ends with a profit. Four headline figures (total
+  profit, sales, buys, net margin), a cumulative profit chart, the best and worst item with their real
+  in-game icons, and three key stats (average profit per sale, flip success rate, total flips). Fades in
+  like the HUD; `/bzassist summary` reopens it, `/bzassist dev summary` shows an example filled with
+  reference figures.
+- **Session reports**: every session streams a full timestamped record to `config/bzassist/sessions/` —
+  config and profile at start, phase changes, every instruction, every container the scanner read, every
+  chat line, feed updates and failures, a state sample every five seconds, and every exception the mod
+  caught. Closed with a summary; `/bzassist session` prints the path.
+- **Persistent daily limit**, per Minecraft account: `config/bzassist/limit-<uuid>.properties`. It is
+  charged only when chat confirms an order, resets at 00:00 UTC (7pm EST), and can be cleared by hand.
+- `/bzassist daily [reset]`, `/bzassist summary`, `/bzassist dev summary`, `/bzassist session` and
+  `/bzassist selftest`.
+- `FontRenderer` gained letterspacing, which every all-caps label now uses.
+
+### Changed
+
+- **HUD**: one wide rounded card with the instruction in 11 px white, profit right-aligned in green with a
+  small tracked `/H`, the detail and item name beneath, and a single six-column row —
+  `PROFIT/H · LIMIT · CYCLE · SLOTS · SESSION · TIME` — separated by hairlines. True 8 px rounded
+  corners drawn row by row, a 1 px border, 6.5 px tracked labels over 9.5 px values.
+- **HUD motion**: the card fades and rises in when a session starts and fades out when it stops; a step
+  change cross-fades the instruction, detail and item name (old out and up, new in from below) while the
+  width eases to the wider of the two; the slot outline breathes on a 1.8 s sine.
+- `SLOTS` now means order slots in use over allowed (`2/14`), not free inventory slots.
+- The daily limit is spent per placement and per relist, and the summary and HUD figures are fed from the
+  same confirm screens.
 
 ### Fixed
 
 - Bazaar search typed the tier ("Smoldering 6") while the item is "Smoldering VI", so nothing came up.
-  The search term is now the base name with the tier stripped ("Smoldering"): a substring that exists.
-- The daily limit was only remembered in memory and was charged on the confirm screen, so a refused or
-  abandoned click burned the cap. It now persists per Minecraft account in
-  `config/bzassist/limit-<uuid>.properties`, charges only when chat confirms the order was created, and
-  resets at 00:00 UTC (7pm EST) or with `/bzassist daily reset`.
+  The search term is now the base name with the tier stripped ("Smoldering"), a substring that exists.
+- The daily limit was charged when the confirm screen opened, so a refused or abandoned click burned the
+  cap. It is now held as pending and only committed when Hypixel confirms the order in chat.
 - When Hypixel says the daily cap is gone, the session stops and the plan is cleared instead of walking
   into refused orders.
-- Long-standing orders were never relisted: the unit price was read as the largest number on the row
-  (the total, not "price per unit"), so every order looked like it was already at the top of the book.
-  The unit-price line is used now, and any order behind the book is relisted (one-minute cooldown per
-  order, and only if the limit can afford it) — not just orders placed this session.
-- The HUD's `SLOTS` figure showed free inventory slots; it now shows order slots in use over allowed.
+- Long-standing orders were never relisted: the unit price was read as the largest number on the row (the
+  total, not "price per unit"), so every order looked like it was already at the top of the book. The
+  unit-price line is used now, and any order behind the book is relisted — one-minute cooldown per order,
+  and only if the limit can afford it — not just orders placed this session.
+- The HUD and the chat prefill were active before a session started, showing "Pick a flip — run
+  /bzassist best" and filling the chat box with it. Both are silent until F6 or an explicit plan.
+- `/viewstash item` and `/viewstash material` answer with a chat line ("Your item stash is empty!") when
+  there is nothing to collect. The session reads those lines and moves on instead of waiting forever for
+  a screen that never opens.
 
-### Changed
+### Known limitations
 
-- HUD motion: the card fades and rises in when a session starts and fades out when it stops; a step
-  change cross-fades the instruction, detail and item name (old out and up, new in from below) while the
-  width eases; the slot outline breathes on a 1.8 s sine.
-- HUD look: true 6 px rounded corners drawn row by row, stepped shadow, inner top highlight, a 2 px
-  accent rail with rounded ends, and a reworked type hierarchy — 10 px instruction, 8 px detail and
-  values, 6.5 px all-caps labels with 0.45 px letterspacing (new tracking support in `FontRenderer`),
-  and profit split into an accent number with a small muted `/H` unit.
-
-### Fixed
-
-- The HUD and the chat prefill were active before a session was started, showing "Pick a flip — run
-  /bzassist best" and filling the chat box with it. Both are now silent until F6 is pressed or an item
-  is planned.
-- `/viewstash item` and `/viewstash material` answer with a chat line ("Your item stash is empty!")
-  instead of a container when there is nothing to collect. The session now reads those lines and moves
-  to the next step instead of waiting forever for a screen that never opens.
+- The exact lore strings of the orders screen, the order-detail Cancel button and the stash screens are
+  still not confirmed against the live game; `/bzassist dump` exists to settle them.
+- Fill-time estimates come from weekly volume, not from observed fills.
+- The session summary only opens on a profitable session; a losing one closes quietly.
 
 ## [1.0.0]
 

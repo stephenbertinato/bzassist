@@ -119,8 +119,11 @@ Tax and order slots are also read from the bazaar GUI when you open it, and the 
 
 The first build downloads Gradle, Loom, Minecraft 26.2 and the assets into `~/.gradle`.
 
-Tagging `v<version>` on a matching `gradle.properties` version builds the jar and attaches it to a
-GitHub release (`.github/workflows/release.yml`); every push runs a build (`.github/workflows/build.yml`).
+Releasing is a version bump: raise `version` in `gradle.properties`, add a `## [x.y.z]` section to
+`CHANGELOG.md`, and push to `main`. If that version has no release yet, the release workflow builds the
+jar and publishes it with that changelog section as the notes. Pushing a tag `v<x.y.z>` does the same,
+and refuses a tag that disagrees with `gradle.properties`. Every push also runs a build
+(`.github/workflows/build.yml`).
 
 ## Troubleshooting
 

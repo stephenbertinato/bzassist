@@ -1,15 +1,16 @@
-# Builds the mod on a version tag and attaches the jar to a GitHub release.
+# Publishes a release for the version in gradle.properties.
 #
-#   git tag v1.0.0 && git push origin v1.0.0
+# Push to main: if v<version> has no release yet, the jar is built and published, with the matching
+# CHANGELOG section as the release notes. So "bump version, update the changelog, push" is a release.
 #
-# The version in gradle.properties should match the tag; the workflow fails the release if it does not,
-# so a jar can never be published under the wrong number.
+# Pushing a tag v<version> does the same, and refuses a tag that disagrees with gradle.properties.
 
 name: release
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -27,20 +28,59 @@ jobs:
         with:
           java-version: '25'
           distribution: 'microsoft'
-      - name: make gradle wrapper executable
-        run: chmod +x ./gradlew
-      - name: check the tag matches the mod version
+      - name: resolve version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+
           version="$(grep -E '^version=' gradle.properties | cut -d= -f2 | tr -d ' ')"
-          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "v$version" != "${GITHUB_REF_NAME}" ]; then
             echo "tag ${GITHUB_REF_NAME} does not match version ${version} in gradle.properties" >&2
             exit 1
           fi
+
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v$version is already released; nothing to publish"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: make gradle wrapper executable
+        if: steps.version.outputs.exists == 'false'
+        run: chmod +x ./gradlew
       - name: build
+        if: steps.version.outputs.exists == 'false'
         run: ./gradlew build
+      - name: cut the changelog section
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+
+          version="${{ steps.version.outputs.version }}"
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
+
+          cat notes.md
       - name: publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build/libs/bzassist-*.jar
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+        if: steps.version.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          version="${{ steps.version.outputs.version }}"
+          gh release create "v$version" build/libs/bzassist-*.jar \
+            --title "BzAssist $version" \
+            --notes-file notes.md
