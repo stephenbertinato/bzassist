@@ -296,9 +296,8 @@ public final class GuideEngine {
 			String open = ItemNames.idForScreenName(BazaarView.productName(view.title()));
 
 			if (open != null && !open.equals(targetId)) {
-				return new Step("Wrong product open",
-						"press Esc, then " + openCommand(targetId, ItemNames.name(targetId)),
-						-1, false, "");
+				return recovery(view, ItemNames.name(open),
+						openCommand(targetId, ItemNames.name(targetId)));
 			}
 		}
 
@@ -331,6 +330,30 @@ public final class GuideEngine {
 			case CONFIRM -> confirm(view, need);
 			case ORDERS -> orders(view, name, command);
 		};
+	}
+
+	/**
+	 * The fastest way back to the step the plan is on. On a bazaar page the Go Back button is one click and
+	 * lands on the page the plan can work from, so it is outlined; otherwise the only route is Esc (to be
+	 * able to type) and the command.
+	 */
+	private static Step recovery(BazaarView view, String strayed, String command) {
+		BazaarView.SlotView back = find(view, "Go Back");
+
+		if (back == null) {
+			back = find(view, "Back");
+		}
+
+		if (back != null) {
+			return new Step("Click Go Back", "left the guide on " + strayed + " · then " + command,
+					back.index(), false, "");
+		}
+
+		if (view.isOpen()) {
+			return new Step("Press Esc", "close the menu, then " + command, -1, false, "");
+		}
+
+		return new Step("Search again", "type " + command + " in chat", -1, false, command);
 	}
 
 	/**

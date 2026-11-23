@@ -385,14 +385,6 @@ public final class AssistOverlay implements HudElement {
 		}
 
 		Slot slot = container.getMenu().slots.get(step.slotIndex());
-
-		// Navigation is never outlined: only slots that belong to the plan.
-		String name = slot.getItem().getHoverName().getString().toLowerCase(Locale.ROOT);
-
-		if (name.contains("go back") || name.equals("back") || name.contains("close")
-				|| name.contains("previous page") || name.contains("next page")) {
-			return;
-		}
 		AbstractContainerScreenAccessor accessor = (AbstractContainerScreenAccessor) (Object) container;
 		int x = accessor.bzassist$leftPos() + slot.x;
 		int y = accessor.bzassist$topPos() + slot.y;

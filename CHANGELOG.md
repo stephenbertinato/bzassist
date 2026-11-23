@@ -3,6 +3,17 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.4] - 2026-11-23
+
+### Changed
+
+- **Navigation is a step again.** `Go Back` (and `Back` when that is the label) is now outlined as the
+  recovery route when you leave the guide's page: it is one click back to a page the plan can work from,
+  faster than Esc and retyping. Only when there is no such button does the guide fall back to "Press Esc,
+  then /bz <term>".
+- A confirm screen for a product that is not the plan is caught before the click, and routed back the same
+  way — so a stray Confirm can never place the wrong order.
+
 ## [1.2.3] - 2026-11-23
 
 ### Fixed
