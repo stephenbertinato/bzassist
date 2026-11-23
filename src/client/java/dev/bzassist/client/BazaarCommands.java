@@ -257,7 +257,10 @@ public final class BazaarCommands {
 
 	private static int profile(FabricClientCommandSource source) {
 		header(source, "Profile");
-		send(source, "purse", ProfileState.purseKnown() ? Coins.format(ProfileState.purse()) : "not detected");
+		send(source, "purse", ProfileState.purseKnown()
+				? Coins.format(ProfileState.purse()) + "  (read from "
+						+ ProfileState.purseSource().name().toLowerCase(java.util.Locale.ROOT).replace('_', ' ') + ")"
+				: "not detected — keep the SkyBlock sidebar visible");
 		send(source, "inventory", ProfileState.usedSlots() + " used, " + ProfileState.freeSlots() + " free");
 		send(source, "tax", BazaarConfig.taxPercent() + "%");
 		send(source, "order slots", Integer.toString(BazaarConfig.orderSlots()));

@@ -3,6 +3,18 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.3] - 2026-11-23
+
+### Fixed
+
+- **Purse detection, properly.** The figure is now read from four independent places, in order: every
+  scoreboard display slot and every objective (not only `SIDEBAR`), the SkyBlock Menu item in the
+  inventory, and the lore of any open container. Each candidate goes through one tolerant parser that
+  accepts `Purse: 666,666,666`, `Purse 1.2M`, `Purse: 3 000 000`, a coin glyph instead of the word, and
+  dot-separated thousands; implausible values are rejected rather than stored, and a source that finds
+  nothing falls through to the next instead of clearing a value that was already right.
+- `/bzassist profile` now says which source the purse came from, so a wrong figure can be traced.
+
 ## [1.2.2] - 2026-11-23
 
 ### Fixed

@@ -8,13 +8,17 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.Set;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
@@ -38,6 +42,7 @@ public final class ProfileState {
 	public static final double DAILY_LIMIT_COINS = 15.0E9;
 
 	private static volatile long purse = -1L;
+	private static volatile PurseSource purseSource = PurseSource.UNKNOWN;
 	private static volatile long spentToday;
 	private static volatile boolean limitExhausted;
 	private static volatile boolean limitLoaded;
@@ -372,65 +377,229 @@ public final class ProfileState {
 		freeSlots = Math.max(0, 36 - used);
 	}
 
+	/** Where the purse figure came from, for `/bzassist profile` and the session report. */
+	public enum PurseSource {
+		UNKNOWN,
+		SIDEBAR,
+		SCOREBOARD,
+		MENU_ITEM,
+		CONTAINER
+	}
+
+	/** "Purse: 666,666,666", "Purse 1.2M", also with a coin glyph instead of the word. */
+	private static final java.util.regex.Pattern PURSE_LINE = java.util.regex.Pattern
+			.compile("(?i)purse[^0-9]{0,14}([0-9][0-9,._ ]*)\\s*([kmbt])?");
+	private static final java.util.regex.Pattern COIN_LINE = java.util.regex.Pattern
+			.compile("[⏣⛃\\u058f]\\s*([0-9][0-9,._ ]*)\\s*([kmbt])?");
+
+	public static PurseSource purseSource() {
+		return purseSource;
+	}
+
+	/**
+	 * The purse, from four independent places, in order of how fresh they are: the scoreboard (every
+	 * display slot and every objective, not just SIDEBAR), the SkyBlock Menu item in the inventory, and
+	 * the lore of whatever container is open. Each candidate is parsed with the same tolerant parser and
+	 * sanity-checked before it is accepted, and a failure falls through to the next source instead of
+	 * clearing a value that was already right.
+	 */
 	private static void readPurse(Minecraft minecraft) {
 		ClientLevel level = minecraft.level;
 
-		if (level == null) {
+		if (level != null) {
+			Scoreboard scoreboard = level.getScoreboard();
+			Set<Objective> objectives = new LinkedHashSet<>();
+
+			for (DisplaySlot slot : DisplaySlot.values()) {
+				Objective displayed = scoreboard.getDisplayObjective(slot);
+
+				if (displayed != null) {
+					objectives.add(displayed);
+				}
+			}
+
+			objectives.addAll(scoreboard.getObjectives());
+
+			for (Objective objective : objectives) {
+				if (readPurseFromObjective(scoreboard, objective)) {
+					return;
+				}
+			}
+		}
+
+		if (readPurseFromInventory(minecraft.player)) {
 			return;
 		}
 
-		Scoreboard scoreboard = level.getScoreboard();
-
-		// The sidebar is not always on SIDEBAR; check every display slot before giving up.
-		for (DisplaySlot slot : DisplaySlot.values()) {
-			Objective objective = scoreboard.getDisplayObjective(slot);
-
-			if (objective == null) {
-				continue;
-			}
-
-			if (readPurseFrom(scoreboard, objective)) {
-				return;
-			}
-		}
+		readPurseFromContainer();
 	}
 
-	/** Reads the purse line out of one objective. Returns true when it found one. */
-	private static boolean readPurseFrom(Scoreboard scoreboard, Objective objective) {
+	/** Reads the purse out of one objective. Returns true when it found a figure. */
+	private static boolean readPurseFromObjective(Scoreboard scoreboard, Objective objective) {
 		String title = ItemNames.strip(objective.getDisplayName().getString()).toLowerCase(Locale.ROOT);
+		boolean skyblock = title.contains("skyblock");
 
-		if (title.contains("skyblock")) {
+		if (skyblock) {
 			skyblockSidebar = true;
 		}
 
 		for (PlayerScoreEntry entry : scoreboard.listPlayerScores(objective)) {
 			Component display = entry.display();
 			String text = ItemNames.strip(display != null ? display.getString() : entry.owner());
-			String lower = text.toLowerCase(Locale.ROOT);
+			long value = parsePurse(text);
 
-			if (!lower.contains("purse") && !lower.contains("coins") && !lower.contains("coin")) {
-				continue;
+			if (value >= 0) {
+				applyPurse(value, skyblock ? PurseSource.SIDEBAR : PurseSource.SCOREBOARD);
+				return true;
 			}
 
-			// "Purse: 12,345" or "Purse: 12,345 coins" or a coin glyph instead of a colon.
-			String tail = text;
-			int colon = Math.max(text.indexOf(':'), text.indexOf('⏣'));
+			// Some layouts print the balance as a coin glyph with no "Purse" label.
+			java.util.regex.Matcher coin = COIN_LINE.matcher(text);
 
-			if (colon >= 0) {
-				tail = text.substring(colon + 1);
+			if (skyblock && coin.find()) {
+				long glyph = parseNumber(coin.group(1), coin.group(2));
+
+				if (glyph >= 0) {
+					applyPurse(glyph, PurseSource.SIDEBAR);
+					return true;
+				}
 			}
-
-			if (!tail.matches(".*\\d.*")) {
-				continue;
-			}
-
-			skyblockSidebar = true;
-			// Zero is a real answer: an empty purse used to be treated as "not detected".
-			purse = Math.max(0L, Math.round(Coins.parse(tail)));
-			return true;
 		}
 
 		return false;
+	}
+
+	/** The SkyBlock Menu item carries the purse in its lore. */
+	private static boolean readPurseFromInventory(LocalPlayer player) {
+		if (player == null) {
+			return false;
+		}
+
+		Inventory inventory = player.getInventory();
+
+		for (int i = 0; i < Math.min(36, inventory.getContainerSize()); i++) {
+			ItemStack stack = inventory.getItem(i);
+
+			if (stack.isEmpty()) {
+				continue;
+			}
+
+			String name = stack.getHoverName().getString().toLowerCase(Locale.ROOT);
+
+			if (!name.contains("skyblock menu") && !name.contains("skyblock hub")) {
+				continue;
+			}
+
+			long value = parsePurse(stack.getHoverName().getString());
+			ItemLore lore = stack.get(DataComponents.LORE);
+
+			if (value < 0 && lore != null) {
+				for (Component line : lore.lines()) {
+					value = parsePurse(line.getString());
+
+					if (value >= 0) {
+						break;
+					}
+				}
+			}
+
+			if (value >= 0) {
+				skyblockSidebar = true;
+				applyPurse(value, PurseSource.MENU_ITEM);
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** Whatever container is open may print the purse in an info item. */
+	private static boolean readPurseFromContainer() {
+		BazaarView view = BazaarScreenReader.lastContainer();
+
+		for (BazaarView.SlotView slot : view.slots()) {
+			long value = parsePurse(slot.name());
+
+			if (value < 0) {
+				for (String line : slot.lore()) {
+					value = parsePurse(line);
+
+					if (value >= 0) {
+						break;
+					}
+				}
+			}
+
+			if (value >= 0) {
+				applyPurse(value, PurseSource.CONTAINER);
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static void applyPurse(long value, PurseSource source) {
+		if (value < 0L) {
+			return;
+		}
+
+		purseSource = source;
+
+		if (value != purse) {
+			purse = value;
+			SessionLog.event("purse", value + " from " + source.name().toLowerCase(Locale.ROOT));
+		}
+	}
+
+	/** The figure in a line, or -1 when the line has no purse reading. */
+	private static long parsePurse(String text) {
+		if (text == null || text.isBlank()) {
+			return -1L;
+		}
+
+		java.util.regex.Matcher matcher = PURSE_LINE.matcher(text);
+
+		if (!matcher.find()) {
+			return -1L;
+		}
+
+		return parseNumber(matcher.group(1), matcher.group(2));
+	}
+
+	/** "666,666,666", "1.2M", "3 000 000" and similar to coins, or -1 when it is not a sane amount. */
+	private static long parseNumber(String digits, String suffix) {
+		if (digits == null) {
+			return -1L;
+		}
+
+		String clean = digits.replace(",", "").replace("_", "").replace(" ", "").trim();
+
+		// "1.234.567" uses dots as separators; a single dot is a decimal point.
+		if (clean.chars().filter(c -> c == '.').count() > 1) {
+			clean = clean.replace(".", "");
+		}
+
+		double value;
+
+		try {
+			value = Double.parseDouble(clean);
+		} catch (NumberFormatException exception) {
+			return -1L;
+		}
+
+		if (suffix != null) {
+			value *= switch (suffix.toLowerCase(Locale.ROOT)) {
+				case "k" -> 1.0E3;
+				case "m" -> 1.0E6;
+				case "b" -> 1.0E9;
+				case "t" -> 1.0E12;
+				default -> 1.0;
+			};
+		}
+
+		long coins = Math.round(value);
+		return coins >= 0L && coins <= 10_000_000_000_000L ? coins : -1L;
 	}
 
 	/** UTC instant of the next daily reset, for the HUD. */
