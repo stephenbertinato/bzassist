@@ -39,10 +39,9 @@ public final class GuideEngine {
 	}
 
 	private static final Pattern AMOUNT = Pattern.compile("(\\d[\\d,]*)\\s*x");
+	private static final Pattern DIGITS = Pattern.compile("(\\d[\\d,]*)");
 	/** "32/64" or "32 / 64" on an order row: how much of the order has filled. */
 	private static final Pattern PROGRESS = Pattern.compile("(\\d[\\d,]*)\\s*/\\s*(\\d[\\d,]*)");
-	private static final int[] STACK_SIZES = {64, 160, 1024};
-	private static final String[] STACK_LABELS = {"Get me a stack", "A big stack", "One thousand"};
 
 	private static volatile String targetId;
 	private static volatile int targetQuantity;
@@ -78,7 +77,7 @@ public final class GuideEngine {
 
 	/** Lets the session replace the step the guide computed for the current screen. */
 	public static void overrideStep(Step replacement) {
-		step = replacement;
+		step = sanitise(replacement);
 	}
 
 	public static String targetId() {
@@ -176,7 +175,7 @@ public final class GuideEngine {
 			noteOrderPlaced(view);
 		}
 
-		step = decide(view);
+		step = sanitise(decide(view));
 		SessionLog.step(step);
 		FlipSession.tick();
 	}
@@ -291,9 +290,16 @@ public final class GuideEngine {
 	}
 
 	private static Step decide(BazaarView view) {
-		// If the player opened a product by hand, follow what is actually on screen.
-		if (view.kind() == BazaarView.Kind.PRODUCT) {
-			followScreen(view);
+		// A product page that is not the plan is never adopted: highlight only what the plan asked for,
+		// and tell the player how to get back to it.
+		if (targetId != null && view.kind() == BazaarView.Kind.PRODUCT) {
+			String open = ItemNames.idForScreenName(BazaarView.productName(view.title()));
+
+			if (open != null && !open.equals(targetId)) {
+				return new Step("Wrong product open",
+						"press Esc, then " + "/bz " + searchTerm(targetId, ItemNames.name(targetId)),
+						-1, false, "");
+			}
 		}
 
 		if (ProfileState.limitExhausted()) {
@@ -340,41 +346,36 @@ public final class GuideEngine {
 	}
 
 	/**
-	 * Adopts the product whose page is open. The player is allowed to ignore the suggested command and
-	 * browse the bazaar by hand; whatever they opened becomes the plan, so the rest of the guide still
-	 * applies to the item in front of them.
+	 * Only four things may ever be typed by the guide: {@code /bz <term>}, bare {@code /bz},
+	 * {@code /managebazaarorders}, and {@code /viewstash item|material}. Anything else is dropped, so a
+	 * slot label can never leak into chat as a "command".
 	 */
-	private static void followScreen(BazaarView view) {
-		String shown = BazaarView.productName(view.title());
-		String id = ItemNames.idForScreenName(shown);
-
-		if (id == null || id.equals(targetId)) {
-			return;
+	private static String safeCommand(String command) {
+		if (command == null) {
+			return "";
 		}
 
-		BazaarProduct product = BazaarApi.snapshot().get(id);
+		String text = command.trim();
 
-		if (product == null) {
-			return;
+		if (text.equals("/bz") || text.startsWith("/bz ")) {
+			return text;
 		}
 
-		Flip flip = FlipEngine.evaluate(product);
-
-		if (flip != null) {
-			plan(flip);
-		} else {
-			// No ranked flip, but the player is looking at it: walk the same steps with sane defaults.
-			targetId = id;
-			targetQuantity = (int) Math.max(1L, Math.min(64L, ProfileState.capacity(id)));
-			targetBuyPrice = roundTick(product.bestBid() + 0.1);
-			targetSellPrice = roundTick(product.bestAsk() - 0.1);
-			sellOfferQuantity = 0;
-			buyOrderQuantity = 0;
-			lastConfirm = "";
-			step = Step.NONE;
+		if (text.equals("/managebazaarorders")) {
+			return text;
 		}
 
-		BzAssist.LOGGER.info("Following the open screen: {} ({})", ItemNames.name(id), id);
+		if (text.equals("/viewstash item") || text.equals("/viewstash material")) {
+			return text;
+		}
+
+		return "";
+	}
+
+	private static Step sanitise(Step step) {
+		String command = safeCommand(step.command());
+		return command.equals(step.command()) ? step
+				: new Step(step.action(), step.detail(), step.slotIndex(), step.rightClick(), command);
 	}
 
 	/** The text to type after /bz: "Chimera 1", not the full display name. */
@@ -456,14 +457,21 @@ public final class GuideEngine {
 	}
 
 	/** Preset quantities where they exist; otherwise the custom amount sign, which is filled in for you. */
+	/**
+	 * Quantity presets differ per product — books offer "Get me a stack", essence offers "Buy 50!",
+	 * "Buy 100!", "Buy 500!" — so the exact number is matched against whatever the screen actually has,
+	 * and anything else goes through the custom amount sign, which is filled in for you.
+	 */
 	private static Step quantity(BazaarView view, String name, int need) {
-		for (int i = 0; i < STACK_SIZES.length; i++) {
-			if (need == STACK_SIZES[i]) {
-				return slot(view, STACK_LABELS[i], "buy " + need + " " + name);
+		for (BazaarView.SlotView slot : view.slots()) {
+			Matcher digits = DIGITS.matcher(slot.name());
+
+			if (digits.find() && parse(digits.group(1)) == need) {
+				return new Step(slot.name(), "buy " + need + " " + name, slot.index(), false, "");
 			}
 		}
 
-		return slot(view, "Custom Amount", "amount " + need + " is typed in for you");
+		return slotOr(view, "Custom Amount", "Custom", "amount " + need + " is typed in for you");
 	}
 
 	private static Step price(BazaarView view, String name, int need) {

@@ -74,6 +74,12 @@ public final class BazaarScreenReader {
 
 		BazaarView scanned = scan(container);
 
+		if (scanned.kind() != BazaarView.Kind.ORDERS && looksLikeOrders(scanned)) {
+			// The order list can be titled "(Co-op) Bazaar Orders" or something the classifier has not
+			// seen; its rows are unmistakable, so trust them over the title.
+			scanned = new BazaarView(BazaarView.Kind.ORDERS, scanned.title(), scanned.slots());
+		}
+
 		if (scanned.kind() != BazaarView.Kind.OTHER) {
 			readFacts(scanned);
 		}
@@ -82,6 +88,20 @@ public final class BazaarScreenReader {
 		lastContainer = scanned;
 		noteChange(scanned);
 		DebugLog.screen(scanned);
+	}
+
+	/** True when a page's rows look like our own bazaar orders: a unit price and a side. */
+	private static boolean looksLikeOrders(BazaarView view) {
+		boolean price = false;
+		boolean side = false;
+
+		for (BazaarView.SlotView slot : view.slots()) {
+			String lore = slot.loreText();
+			price |= lore.contains("price per unit");
+			side |= lore.contains("sell offer") || lore.contains("buy order");
+		}
+
+		return price && side;
 	}
 
 	/** Records every change of container in the session report, so a session can be replayed. */

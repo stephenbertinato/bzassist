@@ -2,6 +2,7 @@ package dev.bzassist.client.bazaar;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 
@@ -135,24 +136,85 @@ public final class SessionStats {
 			product.spent += total;
 			spent += total;
 		} else {
-			double revenue = total * (1.0 - BazaarConfig.taxFraction());
-			double cost = Math.min(product.boughtUnits, quantity) * product.unitCost();
-			double gain = revenue - cost;
-			sells++;
+			// Listing earns nothing yet. The money, and therefore the profit, arrives when it is claimed.
 			product.soldOrders++;
-			product.soldUnits += quantity;
-			product.earned += revenue;
-			profit += gain;
-
-			if (gain > 0.0) {
-				profitableSells++;
-			}
-
-			ProfileState.addProfit(gain);
 		}
 
 		lastSample = 0L;
 		sample();
+	}
+
+	/**
+	 * A sale that actually happened: the chat line that says coins arrived. Profit is only counted here,
+	 * for the units that were claimed, against the average cost of the units bought.
+	 */
+	public static void claim(String text) {
+		if (text == null || text.isBlank() || startedAt <= 0L || endedAt > 0L) {
+			return;
+		}
+
+		String lower = text.toLowerCase(Locale.ROOT);
+
+		if (!lower.contains("coin")) {
+			return;
+		}
+
+		if (!lower.contains("sold") && !lower.contains("selling") && !lower.contains("earned")
+				&& !lower.contains("claimed") && !lower.contains("you received")) {
+			return;
+		}
+
+		java.util.regex.Matcher money = java.util.regex.Pattern
+				.compile("([\\d,]+(?:\\.\\d+)?)\\s*coins").matcher(lower);
+		java.util.regex.Matcher amount = java.util.regex.Pattern
+				.compile("(\\d[\\d,]*)\\s*x\\b").matcher(lower);
+
+		if (!money.find()) {
+			return;
+		}
+
+		double revenue = Math.max(0.0, Coins.parse(money.group(1)));
+
+		if (revenue <= 0.0) {
+			return;
+		}
+
+		int units = amount.find() ? (int) Math.max(1L, Math.round(Coins.parse(amount.group(1)))) : 0;
+		Product product = productIn(lower);
+		double cost = 0.0;
+
+		if (product != null) {
+			int claimed = units > 0 ? Math.min(units, Math.max(1, product.boughtUnits)) : 1;
+			cost = claimed * product.unitCost();
+			product.soldUnits += units;
+			product.earned += revenue;
+		}
+
+		double gain = revenue - cost;
+		sells++;
+		profit += gain;
+
+		if (gain > 0.0) {
+			profitableSells++;
+		}
+
+		ProfileState.addProfit(gain);
+		SessionLog.event("claim", String.format(Locale.ROOT, "%s%s for %s → profit %s",
+				units > 0 ? units + "x " : "", product == null ? "item" : product.name(),
+				Coins.compact(revenue), Coins.compact(gain)));
+		lastSample = 0L;
+		sample();
+	}
+
+	/** The traded product a chat line is about, by its display name. */
+	private static Product productIn(String lower) {
+		for (Product product : PRODUCTS.values()) {
+			if (!product.name().isBlank() && lower.contains(product.name().toLowerCase(Locale.ROOT))) {
+				return product;
+			}
+		}
+
+		return null;
 	}
 
 	/** Fills the summary with the reference figures so the screen can be checked in game. */

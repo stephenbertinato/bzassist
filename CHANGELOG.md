@@ -3,6 +3,32 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.1] - 2026-11-23
+
+### Fixed
+
+- **Purse not detected.** The purse line was only looked for on the `SIDEBAR` display slot, and a purse
+  of 0 coins was thrown away as "no value". It is now read from every display slot, and zero is a real
+  reading, so sizing stops proposing orders you cannot pay for.
+- **The order list was not recognised.** A page whose title the classifier does not know is now treated
+  as the orders screen when its rows carry a unit price and a buy/sell side, which is what coop titles
+  and renamed menus look like.
+- **Order rows were misread.** `Offer amount: 89x` and `Price Per Unit: 749,986.6 coins` are now parsed
+  directly, so an order's quantity and unit price are right even when nothing has filled.
+- **Profit is counted when it is claimed, not when it is listed.** A sale only adds to the session when
+  the chat line says the coins arrived, and only for the units it names, against the average cost of the
+  units bought. Placing a sell offer no longer counts as profit.
+- **Random product pages were adopted as the plan.** Opening any bazaar product used to replace the plan
+  and propose "buy 64" of it. Now the guide only ever follows the planned item: open something else and
+  it says "Wrong product open — press Esc, then /bz <term>".
+- **Commands could be nonsense.** Only `/bz <term>`, bare `/bz`, `/managebazaarorders` and
+  `/viewstash item|material` are ever offered; anything else a step might have produced is dropped.
+- **Quantity presets assumed books.** "Get me a stack / A big stack / One thousand" do not exist for
+  essence, which offers "Buy 50! / Buy 100! / Buy 500!". The guide now matches whatever preset the screen
+  actually shows for the exact amount, and otherwise uses the custom amount sign, pre-filled.
+- **Highlighting.** Only slots that belong to the plan (or a running session) are outlined, and
+  navigation buttons — Back, Go Back, Close, page arrows — never are.
+
 ## [1.2.0] - 2026-11-23
 
 ### Added

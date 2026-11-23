@@ -54,6 +54,7 @@ public final class ChatWatch {
 
 		SessionLog.chat(line);
 		ProfileState.noteChat(line);
+		SessionStats.claim(line);
 	}
 
 	/** Forgets everything, so an answer to the previous question cannot satisfy the next one. */

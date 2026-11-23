@@ -129,6 +129,12 @@ public final class BazaarCommands {
 		List<Flip> flips = FlipEngine.rank(Math.max(count, slots));
 
 		if (flips.isEmpty()) {
+			if (ProfileState.purseKnown() && ProfileState.purse() < 1_000_000L) {
+				error(source, "Purse is " + Coins.compact(ProfileState.purse())
+						+ " — nothing on the bazaar is affordable at that size.");
+				return 0;
+			}
+
 			error(source, "No flips yet — the bazaar data has not loaded.");
 			error(source, BazaarApi.snapshot().isEmpty() ? "fetch: " + BazaarApi.lastError() : "no positive margin right now");
 			return 0;

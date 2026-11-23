@@ -380,38 +380,57 @@ public final class ProfileState {
 		}
 
 		Scoreboard scoreboard = level.getScoreboard();
-		Objective sidebar = scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR);
 
-		if (sidebar == null) {
-			return;
+		// The sidebar is not always on SIDEBAR; check every display slot before giving up.
+		for (DisplaySlot slot : DisplaySlot.values()) {
+			Objective objective = scoreboard.getDisplayObjective(slot);
+
+			if (objective == null) {
+				continue;
+			}
+
+			if (readPurseFrom(scoreboard, objective)) {
+				return;
+			}
 		}
+	}
 
-		String title = ItemNames.strip(sidebar.getDisplayName().getString()).toLowerCase(Locale.ROOT);
+	/** Reads the purse line out of one objective. Returns true when it found one. */
+	private static boolean readPurseFrom(Scoreboard scoreboard, Objective objective) {
+		String title = ItemNames.strip(objective.getDisplayName().getString()).toLowerCase(Locale.ROOT);
 
 		if (title.contains("skyblock")) {
 			skyblockSidebar = true;
 		}
 
-		for (PlayerScoreEntry entry : scoreboard.listPlayerScores(sidebar)) {
+		for (PlayerScoreEntry entry : scoreboard.listPlayerScores(objective)) {
 			Component display = entry.display();
 			String text = ItemNames.strip(display != null ? display.getString() : entry.owner());
 			String lower = text.toLowerCase(Locale.ROOT);
 
-			if (!lower.contains("purse")) {
+			if (!lower.contains("purse") && !lower.contains("coins") && !lower.contains("coin")) {
+				continue;
+			}
+
+			// "Purse: 12,345" or "Purse: 12,345 coins" or a coin glyph instead of a colon.
+			String tail = text;
+			int colon = Math.max(text.indexOf(':'), text.indexOf('⏣'));
+
+			if (colon >= 0) {
+				tail = text.substring(colon + 1);
+			}
+
+			if (!tail.matches(".*\\d.*")) {
 				continue;
 			}
 
 			skyblockSidebar = true;
-			int colon = text.indexOf(':') >= 0 ? text.indexOf(':') : text.indexOf('⏣');
-			String tail = colon >= 0 ? text.substring(colon + 1) : text;
-			double parsed = Coins.parse(tail);
-
-			if (parsed > 0.0) {
-				purse = Math.round(parsed);
-			}
-
-			return;
+			// Zero is a real answer: an empty purse used to be treated as "not detected".
+			purse = Math.max(0L, Math.round(Coins.parse(tail)));
+			return true;
 		}
+
+		return false;
 	}
 
 	/** UTC instant of the next daily reset, for the HUD. */

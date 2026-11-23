@@ -62,6 +62,11 @@ public final class FlipSession {
 	private static final Map<String, Long> LAST_RELISTED = new HashMap<>();
 
 	private static final Pattern SPLIT = Pattern.compile("(\\d[\\d,]*)\\s*/\\s*(\\d[\\d,]*)");
+	/** "Offer amount: 89x" as the order rows print it when nothing has filled yet. */
+	private static final Pattern OFFER_AMOUNT =
+			Pattern.compile("(?:offer|order)?\\s*amount\\s*:?\\s*(\\d[\\d,]*)");
+	private static final Pattern FILLED = Pattern.compile("filled\\s*:?\\s*(\\d[\\d,]*)");
+	private static final Pattern UNIT_PRICE = Pattern.compile("price per unit\\s*:?\\s*(\\d[\\d,]*(?:\\.\\d+)?)");
 	private static final Pattern MONEY = Pattern.compile("(\\d[\\d,]*(?:\\.\\d+)?)");
 
 	private static Phase lastPhase = Phase.OFF;
@@ -282,10 +287,18 @@ public final class FlipSession {
 			int total = Math.max(1, slot.count());
 			int filled = 0;
 			Matcher split = SPLIT.matcher(slot.loreText());
+			Matcher amount = OFFER_AMOUNT.matcher(slot.loreText());
+			Matcher filledLine = FILLED.matcher(slot.loreText());
 
 			if (split.find()) {
 				filled = number(split.group(1));
 				total = Math.max(filled, number(split.group(2)));
+			} else if (amount.find()) {
+				total = Math.max(1, number(amount.group(1)));
+			}
+
+			if (filledLine.find()) {
+				filled = Math.max(filled, number(filledLine.group(1)));
 			}
 
 			own.add(new OwnOrder(id, ItemNames.name(id), sellSide, priceOf(slot), filled, total));
@@ -299,6 +312,17 @@ public final class FlipSession {
 	 * smallest plausible number is used.
 	 */
 	private static double priceOf(BazaarView.SlotView slot) {
+		// "Price Per Unit: 749,986.6 coins" — the exact line, whatever the capitalisation.
+		Matcher unit = UNIT_PRICE.matcher(slot.loreText());
+
+		if (unit.find()) {
+			double parsed = Coins.parse(unit.group(1));
+
+			if (parsed > 0.0) {
+				return parsed;
+			}
+		}
+
 		double smallest = 0.0;
 
 		for (String line : slot.lore()) {
@@ -703,6 +727,12 @@ public final class FlipSession {
 
 			GuideEngine.plan(flip);
 			note = "next: " + flip.name();
+			return;
+		}
+
+		if (ProfileState.purseKnown() && ProfileState.purse() < 1_000_000L) {
+			push(new GuideEngine.Step("Not enough coins",
+					"purse " + Coins.compact(ProfileState.purse()) + " · nothing affordable", -1, false, ""));
 			return;
 		}
 
