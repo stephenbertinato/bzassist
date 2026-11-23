@@ -142,6 +142,7 @@ and refuses a tag that disagrees with `gradle.properties`. Every push also runs 
   sizing and ranking, and what is still unverified against the live game.
 - [docs/fonts.md](docs/fonts.md) — the FreeType text renderer and why MSDF was dropped.
 - [docs/improvements.md](docs/improvements.md) — the roadmap: what to build next, in order, with effort.
+- [docs/testing.md](docs/testing.md) — a step-by-step checklist that exercises every feature.
 - [CHANGELOG.md](CHANGELOG.md) — what changed, and the known limitations of this release.
 
 ## Layout
