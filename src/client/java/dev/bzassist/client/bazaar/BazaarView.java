@@ -36,6 +36,8 @@ public record BazaarView(Kind kind, String title, List<SlotView> slots) {
 		ORDERS,
 		/** "Order options": one order, with its Cancel Order button. */
 		ORDER_DETAIL,
+		/** "View Stash": items or materials waiting to be collected. */
+		STASH,
 		/** Any other container. */
 		OTHER
 	}
@@ -104,6 +106,10 @@ public record BazaarView(Kind kind, String title, List<SlotView> slots) {
 
 		if (text.isEmpty()) {
 			return Kind.NONE;
+		}
+
+		if (text.contains("view stash") || text.equals("stash") || text.endsWith(" stash")) {
+			return Kind.STASH;
 		}
 
 		if (text.contains("order options")) {

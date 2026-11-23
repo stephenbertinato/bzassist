@@ -329,7 +329,7 @@ public final class GuideEngine {
 			case PRICE -> price(view, name, need);
 			case CONFIRM -> confirm(view, need);
 			case ORDERS -> orders(view, name, command);
-			case ORDER_DETAIL -> recovery(view, name, command);
+			case STASH, ORDER_DETAIL -> recovery(view, name, command);
 		};
 	}
 

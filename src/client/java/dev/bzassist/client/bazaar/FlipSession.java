@@ -442,10 +442,10 @@ public final class FlipSession {
 		String title = view.title().toLowerCase(Locale.ROOT);
 
 		if (!title.contains("stash")) {
-			// The stash command answers with a container when there is something to collect and with a
-			// chat line when there is not ("Your item stash is empty!"). Without reading that line the
-			// session sat on a screen that was never going to open.
-			String which = stashStage == 0 ? "item" : "material";
+			// The stash command answers with a container ("View Stash") when there is something to collect
+			// and with a chat line when there is not. Materials come first: they are what a bazaar flip
+			// actually returns.
+			String which = stashStage == 0 ? "material" : "item";
 
 			if (saysEmpty(which)) {
 				SessionLog.event("stash", which + " stash empty (chat)");
@@ -459,25 +459,60 @@ public final class FlipSession {
 		}
 
 		for (BazaarView.SlotView slot : view.slots()) {
-			String id = ItemNames.idForScreenName(slot.name());
+			String name = slot.name();
 
-			if (id == null) {
+			if (name.isBlank()) {
 				continue;
 			}
 
-			int units = Math.max(1, slot.count());
+			String id = stashItem(name, slot.itemId());
 
-			if (units > ProfileState.freeSlots() * 64) {
+			if (id == null) {
+				SessionLog.event("stash", "row '" + name + "' did not resolve to a product");
+				continue;
+			}
+
+			int units = Math.max(1, Math.max(slot.count(), unitsIn(name)));
+			int capacity = ProfileState.freeSlots() * 64;
+
+			if (units > capacity) {
+				SessionLog.event("stash", ItemNames.name(id) + " x" + units + " does not fit in " + capacity);
 				continue;
 			}
 
 			note = "collecting " + ItemNames.name(id);
 			push(new GuideEngine.Step("Click to collect " + ItemNames.name(id),
-					"then press Esc", slot.index(), false, ""));
+					"x" + units + " · then press Esc", slot.index(), false, ""));
 			return;
 		}
 
 		advanceStash();
+	}
+
+	/** The bazaar product a stash row is: its name without the "x2" suffix, or its item id. */
+	private static String stashItem(String name, String itemId) {
+		String id = ItemNames.idForScreenName(stripCount(name));
+
+		if (id == null) {
+			id = ItemNames.idFor(stripCount(name));
+		}
+
+		if (id == null && itemId != null && BazaarApi.snapshot().get(itemId) != null) {
+			id = itemId;
+		}
+
+		return id;
+	}
+
+	/** "Coal x2" to "Coal". */
+	private static String stripCount(String name) {
+		return name.replaceAll("(?i)\\s+x\\s*[\\d,]+$", "").trim();
+	}
+
+	/** The count printed in a stack name ("Coal x2"), or 1. */
+	private static int unitsIn(String name) {
+		Matcher matcher = Pattern.compile("(?i)\\s+x\\s*([\\d,]+)$").matcher(name);
+		return matcher.find() ? Math.max(1, number(matcher.group(1))) : 1;
 	}
 
 	/** True when Hypixel has just said this half of the stash is empty. */
@@ -486,7 +521,7 @@ public final class FlipSession {
 				|| ChatWatch.seen(20_000L, which, "stash", "nothing");
 	}
 
-	/** Item stash checked: ask about materials next, then move on. */
+	/** Material stash checked first, then the item stash, then move on. */
 	private static void advanceStash() {
 		if (stashStage == 0) {
 			stashStage = 1;

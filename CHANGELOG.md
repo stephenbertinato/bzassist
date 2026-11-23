@@ -3,6 +3,17 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.8] - 2026-11-23
+
+### Changed
+
+- The stash step is real now: the screen is titled `View Stash`, its rows are ordinary item slots, and a
+  stack is named after the item with the amount either in the stack count or as an ` x2` suffix — both are
+  read, the suffix is stripped before the item is matched to a bazaar product, and rows that do not fit in
+  the free inventory are logged and skipped instead of silently dropped.
+- Materials are collected first, then the item stash: materials are what a bazaar flip returns.
+- `View Stash` is its own screen kind, so it is no longer mistaken for an unknown container.
+
 ## [1.2.7] - 2026-11-23
 
 ### Changed

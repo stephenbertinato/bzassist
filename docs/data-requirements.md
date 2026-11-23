@@ -78,13 +78,22 @@ There is no `Filled:` line and no "claim" marker on the row.
 - `[Bazaar] Cancelling order...`
 - `[Bazaar] Cancelled! Refunded 89x Null Atom from cancelling Sell Offer!`
 
+### Stash
+
+- Title: **`View Stash`** for both the material and the item stash.
+- Rows are ordinary item slots (nine of them); a stack is named after the item, e.g. `Coal`, and the
+  amount is either the stack count or an ` x2` suffix on the name. Both are accepted, and the `xN` suffix
+  is stripped before the item is resolved to a bazaar product.
+- Materials are collected **first**; the item stash follows.
+
 ### Purse
 
 Sidebar line, read through the team prefix: `Purse: 622,458,473` → `purse=622458473 source=SIDEBAR`.
 
 ### Still missing from the capture
 
-- the two **stash** screens (not opened)
+- a `debug.jsonl` line for `View Stash` itself (title confirmed by eye; the slot names and their counts
+  have not been seen by the scanner yet)
 - the **sign editors** (not containers, cannot be logged)
 - the chat line after **creating** a buy/sell order
 - the chat line when **coins are claimed**
