@@ -3,6 +3,25 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.2] - 2026-11-23
+
+### Fixed
+
+- A `/bz` term that does not name anything in the bazaar (a derived name can be misspelled) is no longer
+  offered. The term is checked against the live product list; if it fails, the display name is used, then
+  the words from the product id, and bare `/bz` as the last resort.
+- Stopping a session now clears the plan as well, so `F6` really ends everything: the card disappears,
+  the highlight goes away, and starting again begins cleanly instead of resuming a plan you thought was
+  stopped.
+- The profit series no longer moves on a five-second timer. It advances only when something is claimed
+  (or an order is placed), which is also the only moment the profit figure changes.
+
+### Added
+
+- The order list's **Claim All Coins** button is used when it is there, so every finished order is claimed
+  in one click instead of one row at a time.
+- `Go Back`, `Back`, `Close` and the page arrows are never outlined, whatever the step names.
+
 ## [1.2.1] - 2026-11-23
 
 ### Fixed

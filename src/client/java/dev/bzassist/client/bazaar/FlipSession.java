@@ -158,6 +158,7 @@ public final class FlipSession {
 		BzAssist.LOGGER.info("Flip session stopped");
 
 		if (!wasRelistOnly) {
+			GuideEngine.clear();
 			showSummaryIfProfitable();
 		}
 	}
@@ -196,7 +197,6 @@ public final class FlipSession {
 
 		if (++sampleTicks >= 100) {
 			sampleTicks = 0;
-			SessionStats.sample();
 			SessionLog.state(phase.name(), note);
 		}
 

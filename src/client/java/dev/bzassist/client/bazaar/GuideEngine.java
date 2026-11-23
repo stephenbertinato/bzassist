@@ -297,7 +297,7 @@ public final class GuideEngine {
 
 			if (open != null && !open.equals(targetId)) {
 				return new Step("Wrong product open",
-						"press Esc, then " + "/bz " + searchTerm(targetId, ItemNames.name(targetId)),
+						"press Esc, then " + openCommand(targetId, ItemNames.name(targetId)),
 						-1, false, "");
 			}
 		}
@@ -317,7 +317,7 @@ public final class GuideEngine {
 		}
 
 		String name = ItemNames.name(id);
-		String command = "/bz " + searchTerm(id, name);
+		String command = openCommand(id, name);
 		int need = needBuy();
 		int held = ProfileState.unitsHeld(id);
 
@@ -378,10 +378,32 @@ public final class GuideEngine {
 				: new Step(step.action(), step.detail(), step.slotIndex(), step.rightClick(), command);
 	}
 
-	/** The text to type after /bz: "Chimera 1", not the full display name. */
-	private static String searchTerm(String id, String name) {
+	/**
+	 * The chat command that opens this product: {@code /bz <term>} when the term actually names something
+	 * in the bazaar, otherwise the display name, and bare {@code /bz} as the last resort — never a
+	 * misspelled fragment a derived name can produce.
+	 */
+	private static String openCommand(String id, String name) {
 		String term = ItemNames.searchTerm(id);
-		return term.isEmpty() ? ItemNames.commandSafe(name) : term;
+
+		if (!term.isEmpty() && names(term, id)) {
+			return "/bz " + term;
+		}
+
+		String full = ItemNames.commandSafe(name);
+
+		if (!full.isEmpty() && names(full, id)) {
+			return "/bz " + full;
+		}
+
+		String fromId = id.toLowerCase(Locale.ROOT).replace('_', ' ').trim();
+		return fromId.isEmpty() ? "/bz" : "/bz " + fromId;
+	}
+
+	/** True when the term resolves to this product (or to any product at all, for a partial name). */
+	private static boolean names(String term, String id) {
+		String resolved = ItemNames.idFor(term);
+		return resolved != null && (resolved.equals(id) || term.length() >= 4);
 	}
 
 	private static double roundTick(double value) {
@@ -489,6 +511,22 @@ public final class GuideEngine {
 	}
 
 	private static Step orders(BazaarView view, String name, String command) {
+		boolean claimable = false;
+
+		for (BazaarView.SlotView slot : view.slots()) {
+			if (targetId != null && isTargetRow(targetId, slot) && slot.loreContains("claim")) {
+				claimable = true;
+			}
+		}
+
+		// "Claim All Coins" collects every finished order in one click.
+		BazaarView.SlotView claimAll = claimable ? find(view, "Claim All Coins") : null;
+
+		if (claimAll != null) {
+			return new Step("Claim All Coins", name + " · every finished order at once", claimAll.index(),
+					false, "");
+		}
+
 		for (BazaarView.SlotView slot : view.slots()) {
 			if (targetId == null || !isTargetRow(targetId, slot)) {
 				continue;
