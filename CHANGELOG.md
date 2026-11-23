@@ -3,6 +3,32 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.6] - 2026-11-23
+
+Everything here came out of a real `debug.jsonl` capture, not a guess.
+
+### Fixed
+
+- Order rows are titled `SELL <item>` / `BUY <item>`; the side was being looked for in the lore, where it
+  never appears, so every row was skipped and the session saw no orders at all. The name prefix is read
+  now, the SkyBlock id printed on the row (`NULL_ATOM`) is used as the bazaar id directly, and the
+  `Offer amount: 89x` / `Price per unit: 46,619.7 coins` lines are parsed from that same lore.
+- The order detail screen is titled `Order options` and its button is `Cancel Order`. It is now its own
+  kind, so cancelling an order actually happens instead of the session asking for the order list again.
+- Product and price pages were being mistaken for the order list: their lore also contains
+  "Price per unit" and the words "Sell Offer". The order list is only recognised now by rows titled
+  `BUY …` / `SELL …` that print `Offer amount`.
+- `Claim All Coins` is offered whenever it would do something, judged by its own lore
+  (`You don't have any coins to claim.`).
+- Quantity preset `Buy only one!` counts as one; presets differ per item (`Buy only one!`, `Buy 4!`,
+  `Buy 32!` for a book) and anything not offered goes through `Custom Amount`.
+
+### Added
+
+- `docs/data-requirements.md` part 2 now records the real titles, buttons, lore and chat lines from the
+  capture, and lists what is still unknown (stash screens, sign editors, order-created and claim chat
+  lines).
+
 ## [1.2.5] - 2026-11-23
 
 ### Fixed

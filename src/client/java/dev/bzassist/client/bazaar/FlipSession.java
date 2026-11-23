@@ -246,49 +246,30 @@ public final class FlipSession {
 		own.clear();
 
 		for (BazaarView.SlotView slot : view.slots()) {
-			String id = ItemNames.idForScreenName(slot.name());
-
-			if (id == null) {
-				// The row name can be a form the screen index does not carry ("Enchanted Book (Smoldering
-				// VI)", or a coop row that prefixes a name); try the canonical lookup, then the lore.
-				id = ItemNames.idFor(slot.name());
-			}
-
-			if (id == null) {
-				int checked = 0;
-
-				for (String line : slot.lore()) {
-					if (checked++ >= 6) {
-						break;
-					}
-
-					id = ItemNames.idFor(line);
-
-					if (id != null) {
-						break;
-					}
-				}
-			}
-
-			if (id == null) {
-				SessionLog.event("orders", "unreadable row: '" + slot.name() + "' | "
-						+ (slot.lore().isEmpty() ? "no lore" : slot.lore().get(0)));
-				continue;
-			}
-
-			String text = (slot.name() + " " + slot.loreText()).toLowerCase(Locale.ROOT);
-			boolean sellSide = text.contains("sell offer");
-			boolean buySide = text.contains("buy order");
+			String name = slot.name();
+			String lower = name.toLowerCase(Locale.ROOT);
+			String lore = slot.loreText();
+			// Order rows are titled "SELL Broken Radar" / "BUY Null Atom"; the side is the prefix.
+			boolean sellSide = lower.startsWith("sell ") || lore.contains("sell offer");
+			boolean buySide = lower.startsWith("buy ") || lore.contains("buy order");
 
 			if (!sellSide && !buySide) {
 				continue;
 			}
 
+			String id = idOfOrder(slot);
+
+			if (id == null) {
+				SessionLog.event("orders", "unreadable row: '" + name + "' | "
+						+ (slot.lore().isEmpty() ? "no lore" : slot.lore().get(0)));
+				continue;
+			}
+
 			int total = Math.max(1, slot.count());
 			int filled = 0;
-			Matcher split = SPLIT.matcher(slot.loreText());
-			Matcher amount = OFFER_AMOUNT.matcher(slot.loreText());
-			Matcher filledLine = FILLED.matcher(slot.loreText());
+			Matcher split = SPLIT.matcher(lore);
+			Matcher amount = OFFER_AMOUNT.matcher(lore);
+			Matcher filledLine = FILLED.matcher(lore);
 
 			if (split.find()) {
 				filled = number(split.group(1));
@@ -301,8 +282,42 @@ public final class FlipSession {
 				filled = Math.max(filled, number(filledLine.group(1)));
 			}
 
-			own.add(new OwnOrder(id, ItemNames.name(id), sellSide, priceOf(slot), filled, total));
+			double price = priceOf(slot);
+			own.add(new OwnOrder(id, ItemNames.name(id), sellSide, price, filled, total));
+			SessionLog.event("orders", String.format(Locale.ROOT, "%s %s @%.1f %d/%d",
+					sellSide ? "SELL" : "BUY", ItemNames.name(id), price, filled, total));
 		}
+	}
+
+	/**
+	 * The product an order row is about. The game prints the SkyBlock id on the item itself
+	 * ({@code NULL_ATOM}), which is also the bazaar id, so that is tried first; the name and then the lore
+	 * are the fallbacks.
+	 */
+	private static String idOfOrder(BazaarView.SlotView slot) {
+		String itemId = slot.itemId();
+
+		if (itemId != null && !itemId.isBlank() && BazaarApi.snapshot().get(itemId) != null) {
+			return itemId;
+		}
+
+		String id = ItemNames.idForScreenName(slot.name());
+
+		if (id == null) {
+			id = ItemNames.idFor(slot.name());
+		}
+
+		if (id == null) {
+			for (String line : slot.lore()) {
+				id = ItemNames.idFor(line);
+
+				if (id != null) {
+					break;
+				}
+			}
+		}
+
+		return id;
 	}
 
 	/**
@@ -372,7 +387,7 @@ public final class FlipSession {
 				return;
 			}
 
-			if (view.kind() != BazaarView.Kind.ORDERS) {
+			if (view.kind() != BazaarView.Kind.ORDERS && view.kind() != BazaarView.Kind.ORDER_DETAIL) {
 				push(escAware(view, "Back to your orders", "open /managebazaarorders again",
 						"/managebazaarorders"));
 				return;
@@ -635,7 +650,7 @@ public final class FlipSession {
 
 	private static BazaarView.SlotView rowFor(BazaarView view, OwnOrder order) {
 		for (BazaarView.SlotView slot : view.slots()) {
-			if (order.id().equals(ItemNames.idForScreenName(slot.name()))) {
+			if (order.id().equals(slot.itemId()) || order.id().equals(ItemNames.idForScreenName(slot.name()))) {
 				return slot;
 			}
 		}

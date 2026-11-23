@@ -19,6 +19,78 @@ logs/latest.log                 the chat lines (they are the "[CHAT]" lines)
 that is the whole of sections 1 and 2 answered. Screenshots of the two sign editors and of an order row
 would still help, because a sign is not a container and cannot be logged.
 
+## Part 2, answered from the 2026-11-23 capture
+
+Everything below was taken from `debug.jsonl` and `latest.log`, so it is what the game actually prints.
+Screens missing from the capture are listed at the end.
+
+### Screen titles
+
+| Screen | Exact title | Classified as |
+| --- | --- | --- |
+| Bazaar main menu | `Bazaar` | ROOT |
+| Search / category | `Bazaar ➜ Oddities`, `Bazaar ➜ "smoldering"` | CATEGORY |
+| Product | `Smoldering ➜ Smoldering VI` | PRODUCT |
+| Quantity | `How many do you want?` | QUANTITY |
+| Price, buy | `How much do you want to pay?` | PRICE |
+| Price, sell | `At what price are you selling?` | PRICE |
+| Confirm buy | `Confirm Buy Order` | CONFIRM |
+| Confirm sell | `Confirm Sell Offer` | CONFIRM |
+| Order list | `Co-op Bazaar Orders` | ORDERS |
+| Order detail | `Order options` | ORDER_DETAIL |
+
+### Slot names
+
+- Product page: `Buy Instantly`, `Sell Instantly`, the product itself, `Create Buy Order`, `Create Sell Offer`
+- Quantity: `Buy only one!`, `Buy 4!`, `Buy 32!`, `Custom Amount` (lore: `Buy up to 256x.`) — the presets
+  differ per item
+- Price, buy: `Same as Top Order`, `Top Order +0.1`, `5% of Spread`, `Custom Price`
+- Price, sell: `Same as Best Offer`, `Best Offer -0.1`, `10% of Spread`, `Custom Price`
+- Confirm: `Buy Order` / `Sell Offer`
+- Order list: `Go Back` (lore `To Bazaar`), `Close`, `Claim All Coins` (lore `You don't have any coins to
+  claim.` when empty)
+- Order detail: `Cancel Order` (lore `You will be refunded 89x items.`)
+
+### Order rows
+
+Titled `SELL <name>` or `BUY <name>` — **the side is the name prefix, not the lore**. The item's SkyBlock
+id on the slot is the bazaar id itself (`BROKEN_RADAR`, `NULL_ATOM`). Lore:
+
+```
+Worth 8.2M coins
+
+Offer amount: 11x
+
+Price per unit: 749,986.8 coins
+
+By: [MVP+] Hiipo
+```
+
+There is no `Filled:` line and no "claim" marker on the row.
+
+### Confirm screens
+
+- Buy: `Order: 2x Smoldering VI`, `Total price: 11,422,740 coins`
+- Sell: `Selling: 89x Null Atom`, `You earn: 4,102,282 coins`
+
+### Chat
+
+- `[Bazaar] Cancelling order...`
+- `[Bazaar] Cancelled! Refunded 89x Null Atom from cancelling Sell Offer!`
+
+### Purse
+
+Sidebar line, read through the team prefix: `Purse: 622,458,473` → `purse=622458473 source=SIDEBAR`.
+
+### Still missing from the capture
+
+- the two **stash** screens (not opened)
+- the **sign editors** (not containers, cannot be logged)
+- the chat line after **creating** a buy/sell order
+- the chat line when **coins are claimed**
+- what an **outbid/undercut** order looks like (the rows captured were at the front)
+- the order list when it has more rows than fit (page arrows)
+
 ## 1. Screens to open, in this order
 
 | # | Screen | What I read from it |

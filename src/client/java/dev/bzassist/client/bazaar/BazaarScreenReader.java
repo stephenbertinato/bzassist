@@ -90,18 +90,25 @@ public final class BazaarScreenReader {
 		DebugLog.screen(scanned);
 	}
 
-	/** True when a page's rows look like our own bazaar orders: a unit price and a side. */
+	/**
+	 * True when a page's rows are unmistakably our own orders: a row titled "BUY …" or "SELL …" whose lore
+	 * prints "Offer amount". A product page also prints "Price per unit" and the words "Sell Offer", which
+	 * is why the older, looser test misread those pages as the order list.
+	 */
 	private static boolean looksLikeOrders(BazaarView view) {
-		boolean price = false;
-		boolean side = false;
-
-		for (BazaarView.SlotView slot : view.slots()) {
-			String lore = slot.loreText();
-			price |= lore.contains("price per unit");
-			side |= lore.contains("sell offer") || lore.contains("buy order");
+		if (view.kind() != BazaarView.Kind.OTHER && view.kind() != BazaarView.Kind.ROOT) {
+			return false;
 		}
 
-		return price && side;
+		for (BazaarView.SlotView slot : view.slots()) {
+			String name = slot.name().toLowerCase(java.util.Locale.ROOT);
+
+			if ((name.startsWith("buy ") || name.startsWith("sell ")) && slot.loreContains("offer amount")) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/** Records every change of container in the session report, so a session can be replayed. */

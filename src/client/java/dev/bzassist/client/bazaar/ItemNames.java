@@ -304,6 +304,14 @@ public final class ItemNames {
 			return null;
 		}
 
+		// Order rows are titled "SELL Broken Radar" / "BUY Null Atom"; the prefix is the side, not the name.
+		String text = shown.trim();
+		String lower = text.toLowerCase(java.util.Locale.ROOT);
+
+		if (lower.startsWith("sell ") || lower.startsWith("buy ")) {
+			text = text.substring(5).trim();
+		}
+
 		BazaarSnapshot snapshot = BazaarApi.snapshot();
 
 		if (snapshot.isEmpty()) {
@@ -314,7 +322,7 @@ public final class ItemNames {
 			rebuildIndex(snapshot);
 		}
 
-		return canonicalIndex.get(canonical(shown));
+		return canonicalIndex.get(canonical(text));
 	}
 
 	/**

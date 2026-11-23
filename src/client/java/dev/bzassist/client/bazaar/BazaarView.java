@@ -34,6 +34,8 @@ public record BazaarView(Kind kind, String title, List<SlotView> slots) {
 		CONFIRM,
 		/** "(Co-op) Bazaar Orders". */
 		ORDERS,
+		/** "Order options": one order, with its Cancel Order button. */
+		ORDER_DETAIL,
 		/** Any other container. */
 		OTHER
 	}
@@ -102,6 +104,10 @@ public record BazaarView(Kind kind, String title, List<SlotView> slots) {
 
 		if (text.isEmpty()) {
 			return Kind.NONE;
+		}
+
+		if (text.contains("order options")) {
+			return Kind.ORDER_DETAIL;
 		}
 
 		if (text.contains("order") && (text.contains("bazaar orders") || text.contains("manage orders"))) {

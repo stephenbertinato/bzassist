@@ -329,6 +329,7 @@ public final class GuideEngine {
 			case PRICE -> price(view, name, need);
 			case CONFIRM -> confirm(view, need);
 			case ORDERS -> orders(view, name, command);
+			case ORDER_DETAIL -> recovery(view, name, command);
 		};
 	}
 
@@ -510,8 +511,10 @@ public final class GuideEngine {
 	private static Step quantity(BazaarView view, String name, int need) {
 		for (BazaarView.SlotView slot : view.slots()) {
 			Matcher digits = DIGITS.matcher(slot.name());
+			int offered = digits.find() ? parse(digits.group(1))
+					: slot.name().toLowerCase(Locale.ROOT).contains("only one") ? 1 : -1;
 
-			if (digits.find() && parse(digits.group(1)) == need) {
+			if (offered == need) {
 				return new Step(slot.name(), "buy " + need + " " + name, slot.index(), false, "");
 			}
 		}
@@ -534,18 +537,11 @@ public final class GuideEngine {
 	}
 
 	private static Step orders(BazaarView view, String name, String command) {
-		boolean claimable = false;
+		// "Claim All Coins" collects every finished order in one click; when there is nothing to claim it
+		// says so in its own lore, so it is only offered when it would do something.
+		BazaarView.SlotView claimAll = find(view, "Claim All Coins");
 
-		for (BazaarView.SlotView slot : view.slots()) {
-			if (targetId != null && isTargetRow(targetId, slot) && slot.loreContains("claim")) {
-				claimable = true;
-			}
-		}
-
-		// "Claim All Coins" collects every finished order in one click.
-		BazaarView.SlotView claimAll = claimable ? find(view, "Claim All Coins") : null;
-
-		if (claimAll != null) {
+		if (claimAll != null && !claimAll.loreContains("don't have any")) {
 			return new Step("Claim All Coins", name + " · every finished order at once", claimAll.index(),
 					false, "");
 		}
