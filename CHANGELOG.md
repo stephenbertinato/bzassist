@@ -3,6 +3,18 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.5] - 2026-11-23
+
+### Fixed
+
+- **Purse, actually.** A sidebar row on screen is the team prefix, the entry's display name and the team
+  suffix concatenated — on Hypixel nearly all of the text lives in the prefix and suffix, and the entry's
+  own display name is empty. Reading only the display name therefore found nothing, which is why the
+  purse stayed "not detected" with `Purse: 45,813` plainly visible. The reader now builds each row the way
+  the game renders it, then parses that.
+- `/bzassist pursedebug` prints every sidebar row as the reader sees it, with the team prefix and suffix,
+  the parse result for each, and the purse/source it ended up with.
+
 ## [1.2.4] - 2026-11-23
 
 ### Changed

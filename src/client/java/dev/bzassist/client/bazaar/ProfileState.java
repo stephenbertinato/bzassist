@@ -25,6 +25,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
+import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
 
 import dev.bzassist.BzAssist;
@@ -444,8 +445,10 @@ public final class ProfileState {
 		}
 
 		for (PlayerScoreEntry entry : scoreboard.listPlayerScores(objective)) {
-			Component display = entry.display();
-			String text = ItemNames.strip(display != null ? display.getString() : entry.owner());
+			// The line on screen is the team prefix, the entry's own display name and the team suffix. On
+			// Hypixel almost all of the text lives in the prefix/suffix, so reading only display() finds
+			// nothing — which is why the purse was "not detected" with the sidebar plainly showing it.
+			String text = entryLine(scoreboard, entry);
 			long value = parsePurse(text);
 
 			if (value >= 0) {
@@ -550,6 +553,56 @@ public final class ProfileState {
 			purse = value;
 			SessionLog.event("purse", value + " from " + source.name().toLowerCase(Locale.ROOT));
 		}
+	}
+
+	/** One sidebar row exactly as it is rendered: team prefix + display name + team suffix. */
+	private static String entryLine(Scoreboard scoreboard, PlayerScoreEntry entry) {
+		StringBuilder text = new StringBuilder();
+		PlayerTeam team = scoreboard.getPlayersTeam(entry.owner());
+
+		if (team != null && team.getPlayerPrefix() != null) {
+			text.append(team.getPlayerPrefix().getString());
+		}
+
+		Component display = entry.display();
+		text.append(display != null ? display.getString() : entry.owner());
+
+		if (team != null && team.getPlayerSuffix() != null) {
+			text.append(team.getPlayerSuffix().getString());
+		}
+
+		return ItemNames.strip(text.toString());
+	}
+
+	/** Every sidebar row as the reader sees it, for `/bzassist pursedebug`. */
+	public static java.util.List<String> describeSidebar() {
+		java.util.List<String> lines = new java.util.ArrayList<>();
+		ClientLevel level = Minecraft.getInstance().level;
+
+		if (level == null) {
+			lines.add("no level loaded");
+			return lines;
+		}
+
+		Scoreboard scoreboard = level.getScoreboard();
+		Objective objective = scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR);
+
+		if (objective == null) {
+			lines.add("no SIDEBAR objective");
+		} else {
+			lines.add("objective '" + objective.getDisplayName().getString() + "'");
+
+			for (PlayerScoreEntry entry : scoreboard.listPlayerScores(objective)) {
+				PlayerTeam team = scoreboard.getPlayersTeam(entry.owner());
+				lines.add("'" + entryLine(scoreboard, entry) + "'  purse=" + parsePurse(entryLine(scoreboard, entry))
+						+ (team == null ? "  (no team)"
+								: "  team='" + ItemNames.strip(team.getPlayerPrefix().getString()) + "'+'"
+										+ ItemNames.strip(team.getPlayerSuffix().getString()) + "'"));
+			}
+		}
+
+		lines.add("purse=" + purse + " source=" + purseSource);
+		return lines;
 	}
 
 	/** The figure in a line, or -1 when the line has no purse reading. */

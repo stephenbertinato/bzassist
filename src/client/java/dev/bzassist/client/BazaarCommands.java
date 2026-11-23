@@ -50,6 +50,8 @@ public final class BazaarCommands {
 											.executes(context -> price(context.getSource(),
 													StringArgumentType.getString(context, "item")))))
 							.then(ClientCommands.literal("profile").executes(context -> profile(context.getSource())))
+							.then(ClientCommands.literal("pursedebug")
+									.executes(context -> purseDebug(context.getSource())))
 							.then(ClientCommands.literal("session").executes(context -> session(context.getSource())))
 							.then(ClientCommands.literal("orders").executes(context -> orders(context.getSource())))
 							.then(ClientCommands.literal("relist").executes(context -> relist(context.getSource())))
@@ -310,6 +312,17 @@ public final class BazaarCommands {
 	private static int relist(FabricClientCommandSource source) {
 		FlipSession.startRelistOnly();
 		send(source, "relist", "armed — it reads your orders and relists only what is behind the book");
+		return 1;
+	}
+
+	/** Every sidebar row as the purse reader sees it: the fastest way to explain a wrong reading. */
+	private static int purseDebug(FabricClientCommandSource source) {
+		header(source, "Sidebar as read");
+
+		for (String line : ProfileState.describeSidebar()) {
+			send(source, line, "");
+		}
+
 		return 1;
 	}
 
