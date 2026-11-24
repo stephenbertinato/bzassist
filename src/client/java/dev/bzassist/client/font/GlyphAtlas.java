@@ -26,9 +26,15 @@ public final class GlyphAtlas implements AutoCloseable {
 
 	private static final int ATLAS_SIZE = 1024;
 	private static final int PADDING = 1;
+	private static final int FAST_CACHE_SIZE = 8192;
+	private static final int FAST_CACHE_LIMIT = 6144;
 
 	private final NativeImage image = new NativeImage(NativeImage.Format.RGBA, ATLAS_SIZE, ATLAS_SIZE, true);
 	private final Map<Long, Region> regions = new HashMap<>();
+	private final long[] fastKeys = new long[FAST_CACHE_SIZE];
+	private final Region[] fastValues = new Region[FAST_CACHE_SIZE];
+	private final boolean[] fastUsed = new boolean[FAST_CACHE_SIZE];
+	private int fastCount;
 
 	private int penX = PADDING;
 	private int penY = PADDING;
@@ -42,9 +48,20 @@ public final class GlyphAtlas implements AutoCloseable {
 	/** The region for a codepoint at a face's pixel size, rasterising and packing it on first use. */
 	public Region region(TtfFont.Face face, int codepoint) {
 		long key = ((long) face.pixelSize() << 32) | (codepoint & 0xFFFFFFFFL);
+		int slot = (int) (key ^ (key >>> 33)) & (FAST_CACHE_SIZE - 1);
+
+		while (fastUsed[slot]) {
+			if (fastKeys[slot] == key) {
+				return fastValues[slot];
+			}
+
+			slot = (slot + 1) & (FAST_CACHE_SIZE - 1);
+		}
+
 		Region existing = regions.get(key);
 
 		if (existing != null) {
+			cacheFast(key, existing);
 			return existing;
 		}
 
@@ -58,9 +75,32 @@ public final class GlyphAtlas implements AutoCloseable {
 
 		if (region != null) {
 			regions.put(key, region);
+			cacheFast(key, region);
 		}
 
 		return region;
+	}
+
+	/** A primitive hit cache in front of the map, so steady-state frames do not box keys. */
+	private void cacheFast(long key, Region region) {
+		if (fastCount >= FAST_CACHE_LIMIT) {
+			return;
+		}
+
+		int slot = (int) (key ^ (key >>> 33)) & (FAST_CACHE_SIZE - 1);
+
+		while (fastUsed[slot]) {
+			if (fastKeys[slot] == key) {
+				return;
+			}
+
+			slot = (slot + 1) & (FAST_CACHE_SIZE - 1);
+		}
+
+		fastKeys[slot] = key;
+		fastValues[slot] = region;
+		fastUsed[slot] = true;
+		fastCount++;
 	}
 
 	private Region pack(TtfFont.Glyph glyph) {

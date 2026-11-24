@@ -13,20 +13,20 @@ import net.fabricmc.loader.api.FabricLoader;
 /**
  * Settings in {@code config/bzassist.properties}.
  *
- * <p>Several mirror things the game knows but never exposes to the API, so they are read from the GUI
- * while it is open (see {@code BazaarScreenReader}); the values here are the fallbacks. A fresh install
- * therefore still produces sane numbers before the player has opened the bazaar.</p>
+ * <p>The optimizer has no live GUI to read tax from any more, so the tax rate is a setting. Target
+ * fill time is the main sizing knob; the hard maximum only rejects orders that the book makes
+ * implausibly slow.</p>
  */
 public final class BazaarConfig {
 	private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("bzassist.properties");
 	private static boolean loaded;
-	private static int pollIntervalMs = 5000;
+	private static int pollIntervalMs = 20_000;
 	private static double taxPercent = 1.25;
-	private static int orderSlots = 14;
-	private static double maxFillHours = 72.0;
-	private static boolean cacheBuster;
+	private static double targetFillHours = 1.0;
+	private static double maxFillHours = 6.0;
 	private static boolean overlay = true;
-	private static boolean debug;
+	private static int panelX = -1;
+	private static int panelY = -1;
 
 	private BazaarConfig() {
 	}
@@ -46,31 +46,21 @@ public final class BazaarConfig {
 		return taxPercent() / 100.0;
 	}
 
-	/** Simultaneous buy/sell orders: 14, 21 (Flipper I) or 28 (Flipper II). */
-	public static int orderSlots() {
+	/** Target fill time for the whole buy-plus-sell cycle, in hours. */
+	public static double targetFillHours() {
 		load();
-		return orderSlots;
+		return targetFillHours;
 	}
 
-	/** Orders expected to take longer than this to fill are not sized up into. */
+	/** Orders expected to take longer than this are rejected instead of recommended. */
 	public static double maxFillHours() {
 		load();
 		return maxFillHours;
 	}
 
-	public static boolean cacheBuster() {
-		load();
-		return cacheBuster;
-	}
-
 	public static boolean overlay() {
 		load();
 		return overlay;
-	}
-
-	public static boolean debug() {
-		load();
-		return debug;
 	}
 
 	public static void setOverlay(boolean enabled) {
@@ -79,35 +69,22 @@ public final class BazaarConfig {
 		save();
 	}
 
-	public static void setDebug(boolean enabled) {
+	/** Saved panel left edge in GUI pixels, or -1 for the automatic position. */
+	public static int panelX() {
 		load();
-		debug = enabled;
-		save();
+		return panelX;
 	}
 
-	/** Called by the screen reader when the GUI prints the real tax rate. */
-	public static void setTaxPercent(double percent) {
+	/** Saved panel top edge in GUI pixels, or -1 for the automatic position. */
+	public static int panelY() {
 		load();
-
-		if (percent <= 0.0 || Math.abs(percent - taxPercent) < 1.0E-4) {
-			return;
-		}
-
-		taxPercent = percent;
-		BzAssist.LOGGER.info("Bazaar tax read from the GUI: {}%", percent);
-		save();
+		return panelY;
 	}
 
-	/** Called by the screen reader when the order list prints "used/max". */
-	public static void setOrderSlots(int slots) {
+	public static void setPanelPosition(float x, float y) {
 		load();
-
-		if (slots <= 0 || slots > 64 || slots == orderSlots) {
-			return;
-		}
-
-		orderSlots = slots;
-		BzAssist.LOGGER.info("Bazaar order slots read from the GUI: {}", slots);
+		panelX = Math.round(x);
+		panelY = Math.round(y);
 		save();
 	}
 
@@ -120,11 +97,11 @@ public final class BazaarConfig {
 		Properties properties = new Properties();
 		properties.setProperty("poll_interval_ms", Integer.toString(pollIntervalMs));
 		properties.setProperty("tax_percent", Double.toString(taxPercent));
-		properties.setProperty("order_slots", Integer.toString(orderSlots));
+		properties.setProperty("target_fill_hours", Double.toString(targetFillHours));
 		properties.setProperty("max_fill_hours", Double.toString(maxFillHours));
-		properties.setProperty("cache_buster", Boolean.toString(cacheBuster));
 		properties.setProperty("overlay", Boolean.toString(overlay));
-		properties.setProperty("debug", Boolean.toString(debug));
+		properties.setProperty("panel_x", Integer.toString(panelX));
+		properties.setProperty("panel_y", Integer.toString(panelY));
 		write(properties);
 	}
 
@@ -144,13 +121,14 @@ public final class BazaarConfig {
 			}
 		}
 
-		pollIntervalMs = (int) clamp(number(properties, "poll_interval_ms", pollIntervalMs), 1_000.0, 600_000.0);
-		taxPercent = clamp(number(properties, "tax_percent", taxPercent), 0.0, 100.0);
-		orderSlots = (int) clamp(number(properties, "order_slots", orderSlots), 1.0, 64.0);
+		pollIntervalMs = (int) clamp(number(properties, "poll_interval_ms", pollIntervalMs), 5_000.0, 600_000.0);
+		taxPercent = clamp(number(properties, "tax_percent", taxPercent), 0.0, 50.0);
+		targetFillHours = clamp(number(properties, "target_fill_hours", targetFillHours), 0.25, 72.0);
 		maxFillHours = clamp(number(properties, "max_fill_hours", maxFillHours), 0.25, 720.0);
-		cacheBuster = Boolean.parseBoolean(properties.getProperty("cache_buster", Boolean.toString(cacheBuster)));
+		maxFillHours = Math.max(maxFillHours, targetFillHours);
 		overlay = Boolean.parseBoolean(properties.getProperty("overlay", Boolean.toString(overlay)));
-		debug = Boolean.parseBoolean(properties.getProperty("debug", Boolean.toString(debug)));
+		panelX = (int) Math.round(clamp(number(properties, "panel_x", panelX), -1.0, 100_000.0));
+		panelY = (int) Math.round(clamp(number(properties, "panel_y", panelY), -1.0, 100_000.0));
 		save();
 	}
 
@@ -159,14 +137,13 @@ public final class BazaarConfig {
 			Files.createDirectories(FILE.getParent());
 			try (OutputStream out = Files.newOutputStream(FILE)) {
 				properties.store(out, """
-						BzAssist settings.
-						poll_interval_ms     how often to fetch the bazaar; the API itself changes every ~20s.
+						BzAssist optimizer settings.
+						poll_interval_ms     how often to fetch while the Bazaar is open (API changes ~20s).
 						tax_percent          bazaar sell tax: 1.25 default, 1.125 at Bazaar Flipper I, 1.0 at II.
-						order_slots          simultaneous buy/sell orders: 14 default, 21 at Flipper I, 28 at II.
-						max_fill_hours       orders expected to fill slower than this are not sized into.
-						cache_buster         add a changing query parameter to defeat CDN caching.
-						overlay              show the assist HUD and the single-button highlight.
-						debug                write every bazaar screen you open to config/bzassist/debug.jsonl.
+						target_fill_hours    expected fill time for the whole buy-plus-sell cycle.
+						max_fill_hours       reject orders expected to take longer than this.
+						overlay              show the top-20 panel while the Bazaar is open.
+						panel_x, panel_y     remembered panel top-left in GUI pixels (-1 = automatic).
 						""");
 			}
 		} catch (IOException e) {

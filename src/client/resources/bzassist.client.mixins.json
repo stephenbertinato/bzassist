@@ -5,8 +5,6 @@
 	"client": [
 		"AbstractContainerScreenAccessor",
 		"AbstractSignEditScreenAccessor",
-		"BzAssistClientMixin",
-		"ChatScreenAccessor",
 		"GuiGraphicsExtractorAccessor"
 	],
 	"injectors": {

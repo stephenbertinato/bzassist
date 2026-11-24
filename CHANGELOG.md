@@ -3,6 +3,80 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [2.0.3] - 2026-11-24
+
+### Added
+
+- **The panel is draggable.** Hold the left mouse button anywhere on the panel and move it to
+  place it wherever you want. The position is saved in `config/bzassist.properties` as `panel_x`
+  and `panel_y`, restored the next time the Bazaar opens, and clamped to stay fully on screen after
+  a resolution change. Clicks over the panel no longer reach the container behind it.
+
+## [2.0.2] - 2026-11-24
+
+### Added
+
+- **Cumulative total profit tracker.** The panel header shows a compact `TOTAL PROFIT` figure, and
+  `/bzassist profit` prints the exact total in chat. Profit is realized from bazaar chat claims and
+  matched against the cost of confirmed buy orders, so placing a sell offer does not count before the
+  coins arrive. The total and the cost basis of open buys persist in `config/bzassist/profit.tsv`.
+- `/bzassist profit reset` zeroes the total at any time without touching the optimizer, its settings
+  or the cost basis of open buys.
+
+## [2.0.1] - 2026-11-24
+
+### Added
+
+- **Sign prefill is back.** Clicking `Custom Amount` or `Custom Price` on a product's order screen fills
+  line 0 of the sign with the recommendation for the product you opened: its quantity, its buy-order
+  price, or its sell-offer price. The mod does not click the button or submit the sign; you still press
+  Done and confirm the order. Products outside the current top 20 are left blank rather than filled
+  with another item's numbers.
+
+### Fixed
+
+- The sign prefill is context-aware: it follows the quantity/price screen's product and side, so an
+  opened sign cannot inherit a different top-20 item.
+
+## [2.0.0] - 2026-11-24
+
+BzAssist is now a read-only optimizer overlay. The guide, slot highlighting, session machine and chat
+prefill are gone; the product is the ranked book and the recommended order size.
+
+### Added
+
+- **Top-20 overlay while the Bazaar is open.** The panel lists rank, item, buy-order price, sell-offer
+  price, quantity, profit per hour and expected fill. It appears on the Bazaar root, category, product
+  and order screens and hides everywhere else.
+- **Pure cached engine.** `FlipEngine` takes an immutable snapshot and `OptimizerContext`; ranking runs
+  on the API worker thread, is cached by `lastUpdated`, and the render pass only reads the published
+  list.
+- **Target-fill sizing.** Quantity is capped by purse, free inventory, market flow over
+  `target_fill_hours`, a 60m notional cap and a unit cap. The old 5-minute slice and 2× top-of-book cap
+  are removed; orders that cannot clear inside `max_fill_hours` are rejected.
+- **Bazaar-only lifecycle.** The feed starts when the Bazaar opens and stops when it closes; the API is
+  no longer polled continuously from client startup.
+
+### Changed
+
+- The panel is compact and cached per ranking result / GUI scale; there is no per-frame ranking and no
+  slot scan for drawing.
+- Tax and fill settings live in `config/bzassist.properties`. The overlay no longer reads the tax off a
+  confirm screen.
+- Commands are limited to `/bzassist best`, `/bzassist refresh` and `/bzassist off`.
+
+### Removed
+
+- The step-by-step guide, slot highlighting, session/relist machine, stash handling, chat/order parsing,
+  summary screen, session logs, F6 keybind, `/bza` and the guide/session commands.
+- The common and empty template mixins and the sign/chat accessors used by the old automation.
+
+### Known limitations
+
+- The new overlay has not been visually verified in-game in the build environment.
+- Fill time is modelled from weekly volume, not observed fills.
+- Purse detection falls back to 1m with a visible warning when the scoreboard is hidden.
+
 ## [1.3.0] - 2026-11-24
 
 A full pass over the session machine and the order reader. The theme is the same everywhere: the

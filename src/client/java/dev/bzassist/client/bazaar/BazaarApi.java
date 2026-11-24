@@ -33,7 +33,7 @@ import dev.bzassist.BzAssist;
  *
  * <p>Measured against the live API: the endpoint needs no key, answers gzip-encoded (3.6 MB of JSON
  * becomes ~500 KB on the wire) and its {@code lastUpdated} advances roughly every 20 seconds. Polling
- * faster than that only spends bandwidth, so the default is 5s and a response carrying an unchanged
+ * faster than that only spends bandwidth, so the default is 20s and a response carrying an unchanged
  * {@code lastUpdated} is not parsed again.</p>
  */
 public final class BazaarApi {
@@ -48,12 +48,15 @@ public final class BazaarApi {
 	private static final ScheduledExecutorService EXEC = Executors.newSingleThreadScheduledExecutor(runnable -> {
 		Thread thread = new Thread(runnable, "bzassist-bazaar");
 		thread.setDaemon(true);
+		// API parsing and ranking are background work; they must never compete with the render thread.
+		thread.setPriority(Thread.MIN_PRIORITY);
 		return thread;
 	});
 
 	private static volatile BazaarSnapshot snapshot = BazaarSnapshot.empty();
 	private static volatile String lastError = "";
 	private static volatile int failures;
+	private static volatile boolean active;
 	private static boolean started;
 
 	private BazaarApi() {
@@ -80,11 +83,23 @@ public final class BazaarApi {
 		EXEC.execute(BazaarApi::pollOnce);
 	}
 
+	/** Called when the Bazaar screen opens or closes, so the feed only runs while it is useful. */
+	public static void setActive(boolean value) {
+		boolean wasActive = active;
+		active = value;
+
+		if (value && !wasActive) {
+			refreshNow();
+		}
+	}
+
 	/** Fetches once, off-thread, without disturbing the poll rhythm. */
 	public static void refreshNow() {
 		EXEC.execute(() -> {
 			try {
 				poll();
+				failures = 0;
+				lastError = "";
 			} catch (Exception exception) {
 				recordFailure(exception);
 			}
@@ -92,6 +107,11 @@ public final class BazaarApi {
 	}
 
 	private static void pollOnce() {
+		if (!active) {
+			EXEC.schedule(BazaarApi::pollOnce, 1_000L, TimeUnit.MILLISECONDS);
+			return;
+		}
+
 		long delay;
 
 		try {
@@ -111,8 +131,6 @@ public final class BazaarApi {
 		failures++;
 		lastError = exception.getClass().getSimpleName() + ": " + exception.getMessage();
 
-		SessionLog.event("api", "fetch failed (" + failures + "): " + lastError);
-
 		if (failures == 1 || failures % 30 == 0) {
 			BzAssist.LOGGER.warn("Bazaar fetch failed ({} in a row): {}", failures, lastError);
 		}
@@ -127,7 +145,6 @@ public final class BazaarApi {
 		}
 
 		snapshot = parse(text);
-		SessionLog.event("api", "snapshot: " + snapshot.size() + " products, lastUpdated " + snapshot.lastUpdated());
 	}
 
 	/** Reads {@code lastUpdated} without building the 2200-product tree, so unchanged polls stay cheap. */
@@ -232,13 +249,7 @@ public final class BazaarApi {
 
 	/** GETs a URL, undoes gzip if the server used it, and returns the body as text. */
 	static String get(String url) throws IOException, InterruptedException {
-		String target = url;
-
-		if (BazaarConfig.cacheBuster()) {
-			target = url + (url.contains("?") ? "&" : "?") + "t=" + System.currentTimeMillis();
-		}
-
-		HttpRequest request = HttpRequest.newBuilder(URI.create(target))
+		HttpRequest request = HttpRequest.newBuilder(URI.create(url))
 				.header("User-Agent", USER_AGENT)
 				.header("Accept-Encoding", "gzip")
 				.timeout(Duration.ofSeconds(30))

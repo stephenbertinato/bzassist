@@ -3,7 +3,7 @@
 	"id": "bzassist",
 	"version": "${version}",
 	"name": "BzAssist",
-	"description": "A step-by-step Hypixel SkyBlock bazaar flipping assistant: ranks flips from the live order book, then highlights the exact slot and pre-fills the exact numbers for every order. It never clicks for you.",
+	"description": "A Hypixel SkyBlock bazaar optimizer: while the Bazaar is open, it shows the top 20 flips with the buy order, sell offer and recommended order size, and pre-fills the bazaar's Custom Amount and Custom Price signs for the product you opened. It never highlights, guides, clicks or sends chat commands automatically.",
 	"authors": [
 		"stephen"
 	],
@@ -20,7 +20,6 @@
 		]
 	},
 	"mixins": [
-		"bzassist.mixins.json",
 		{
 			"config": "bzassist.client.mixins.json",
 			"environment": "client"

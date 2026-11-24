@@ -81,8 +81,16 @@ public final class TtfFont {
 
 	/** A font loaded at one pixel size. */
 	public static final class Face {
+		private static final int KERNING_SLOTS = 4096;
+		private static final int KERNING_LIMIT = 3072;
+
 		private final FT_Face face;
 		private final int pixelSize;
+		private final Map<Integer, Glyph> glyphs = new HashMap<>();
+		private final long[] kerningKeys = new long[KERNING_SLOTS];
+		private final float[] kerningValues = new float[KERNING_SLOTS];
+		private final boolean[] kerningUsed = new boolean[KERNING_SLOTS];
+		private int kerningCount;
 
 		private Face(FT_Face face, int pixelSize) {
 			this.face = face;
@@ -112,6 +120,32 @@ public final class TtfFont {
 		 * uneven compared with real typesetting.
 		 */
 		public float kerning(int left, int right) {
+			long key = ((long) left << 32) | (right & 0xFFFFFFFFL);
+			int slot = (int) (key ^ (key >>> 33)) & (KERNING_SLOTS - 1);
+
+			while (kerningUsed[slot]) {
+				if (kerningKeys[slot] == key) {
+					return kerningValues[slot];
+				}
+
+				slot = (slot + 1) & (KERNING_SLOTS - 1);
+			}
+
+			float value = loadKerning(left, right);
+
+			// Text uses a small alphabet per size; if a pathological screen fills the table, fall
+			// back to computing without caching rather than growing or evicting entries.
+			if (kerningCount < KERNING_LIMIT) {
+				kerningKeys[slot] = key;
+				kerningValues[slot] = value;
+				kerningUsed[slot] = true;
+				kerningCount++;
+			}
+
+			return value;
+		}
+
+		private float loadKerning(int left, int right) {
 			int leftIndex = FreeType.FT_Get_Char_Index(face, left);
 			int rightIndex = FreeType.FT_Get_Char_Index(face, right);
 
@@ -134,8 +168,24 @@ public final class TtfFont {
 			}
 		}
 
-		/** Rasterises a codepoint, or returns {@code null} when the font has no glyph for it. */
+		/** Rasterises a codepoint once per face, or returns {@code null} when the font lacks it. */
 		public Glyph glyph(int codepoint) {
+			Glyph cached = glyphs.get(codepoint);
+
+			if (cached != null) {
+				return cached;
+			}
+
+			Glyph glyph = loadGlyph(codepoint);
+
+			if (glyph != null) {
+				glyphs.put(codepoint, glyph);
+			}
+
+			return glyph;
+		}
+
+		private Glyph loadGlyph(int codepoint) {
 			if (FreeType.FT_Load_Char(face, codepoint, FreeType.FT_LOAD_RENDER) != 0) {
 				return null;
 			}
