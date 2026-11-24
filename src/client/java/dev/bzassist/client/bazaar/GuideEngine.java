@@ -1,8 +1,6 @@
 package dev.bzassist.client.bazaar;
 
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import dev.bzassist.BzAssist;
 
@@ -37,11 +35,6 @@ public final class GuideEngine {
 			return slotIndex >= 0;
 		}
 	}
-
-	private static final Pattern AMOUNT = Pattern.compile("(\\d[\\d,]*)\\s*x");
-	private static final Pattern DIGITS = Pattern.compile("(\\d[\\d,]*)");
-	/** "32/64" or "32 / 64" on an order row: how much of the order has filled. */
-	private static final Pattern PROGRESS = Pattern.compile("(\\d[\\d,]*)\\s*/\\s*(\\d[\\d,]*)");
 
 	private static volatile String targetId;
 	private static volatile int targetQuantity;
@@ -193,34 +186,17 @@ public final class GuideEngine {
 		int listed = 0;
 
 		for (BazaarView.SlotView slot : view.slots()) {
-			// Order rows are matched by the name printed on them. The slot's Minecraft item id is shared
-			// by every book or shard, so comparing it with a bazaar product id never matched anything.
-			if (!isTargetRow(id, slot)) {
+			OrderRow row = OrderRow.parse(slot);
+
+			if (row == null || row.id() == null || !row.id().equals(id)) {
 				continue;
 			}
 
-			String text = (slot.name() + " " + slot.loreText()).toLowerCase(Locale.ROOT);
-			boolean sellSide = text.contains("sell offer");
-			boolean buySide = text.contains("buy order");
-
-			if (!sellSide && !buySide) {
-				continue;
-			}
-
-			int total = slot.count();
-			int filled = 0;
-			Matcher progress = PROGRESS.matcher(slot.loreText());
-
-			if (progress.find()) {
-				filled = parse(progress.group(1));
-				total = Math.max(filled, parse(progress.group(2)));
-			}
-
-			if (sellSide) {
-				listed += Math.max(total - filled, 0);
+			if (row.sellSide()) {
+				listed += row.open();
 			} else {
-				open += Math.max(total - filled, 0);
-				claimable += filled;
+				open += row.open();
+				claimable += row.filled();
 			}
 		}
 
@@ -228,22 +204,6 @@ public final class GuideEngine {
 		buyOpenUnits = open;
 		buyClaimableUnits = claimable;
 		buyOrderQuantity = open + claimable;
-	}
-
-	/** True when an order row is about the product we are guiding. */
-	private static boolean isTargetRow(String id, BazaarView.SlotView slot) {
-		if (id.equals(ItemNames.idForScreenName(slot.name()))) {
-			return true;
-		}
-
-		String name = ItemNames.name(id);
-
-		if (name.isEmpty() || "?".equals(name)) {
-			return false;
-		}
-
-		String normalised = ItemNames.canonical(slot.name());
-		return !normalised.isEmpty() && normalised.equals(ItemNames.canonical(name));
 	}
 
 	/**
@@ -277,11 +237,9 @@ public final class GuideEngine {
 					double value = Coins.parse(line.substring(colon + 1));
 
 					if (value > 0.0) {
+						// Only the pending value: the order is not real until Hypixel says so in chat, and
+						// BazaarChat records it (and the limit) from that line.
 						ProfileState.noteOrderScreen(value);
-						boolean buying = needBuy() > 0;
-						int units = buying ? Math.max(1, needBuy())
-								: Math.max(1, ProfileState.unitsHeld(targetId));
-						SessionStats.order(targetId, ItemNames.name(targetId), buying, units, value);
 						return;
 					}
 				}
@@ -381,8 +339,13 @@ public final class GuideEngine {
 
 		String text = command.trim();
 
-		if (text.equals("/bz") || text.startsWith("/bz ")) {
+		if (text.equals("/bz")) {
 			return text;
+		}
+
+		if (text.startsWith("/bz ")) {
+			String term = text.substring(4).trim();
+			return term.isEmpty() || ItemNames.isUiLabel(term) ? "" : text;
 		}
 
 		if (text.equals("/managebazaarorders")) {
@@ -410,18 +373,18 @@ public final class GuideEngine {
 	private static String openCommand(String id, String name) {
 		String term = ItemNames.searchTerm(id);
 
-		if (!term.isEmpty() && names(term, id)) {
+		if (!term.isEmpty() && !ItemNames.isUiLabel(term) && names(term, id)) {
 			return "/bz " + term;
 		}
 
 		String full = ItemNames.commandSafe(name);
 
-		if (!full.isEmpty() && names(full, id)) {
+		if (!full.isEmpty() && !ItemNames.isUiLabel(full) && names(full, id)) {
 			return "/bz " + full;
 		}
 
 		String fromId = id.toLowerCase(Locale.ROOT).replace('_', ' ').trim();
-		return fromId.isEmpty() ? "/bz" : "/bz " + fromId;
+		return fromId.isEmpty() || ItemNames.isUiLabel(fromId) ? "/bz" : "/bz " + fromId;
 	}
 
 	/** True when the term resolves to this product (or to any product at all, for a partial name). */
@@ -537,17 +500,31 @@ public final class GuideEngine {
 		}
 
 		for (BazaarView.SlotView slot : view.slots()) {
-			if (targetId == null || !isTargetRow(targetId, slot)) {
+			OrderRow row = OrderRow.parse(slot);
+
+			if (row == null || row.id() == null || targetId == null || !row.id().equals(targetId)) {
 				continue;
 			}
 
 			// Claim first: a finished order is dead weight, and claiming it is what lets the sell offer go
-			// up for the whole quantity at once.
-			if (slot.loreContains("claim") || (!slot.loreContains("cancel") && buyOpenUnits == 0)) {
-				return new Step("Left-click to claim", name + " · filled", slot.index(), false, "");
+			// up for the whole quantity at once. A row is only claimable when something actually filled.
+			if (row.filled() > 0 || slot.loreContains("claim")) {
+				return new Step("Left-click to claim", name + " · " + row.filled() + " filled",
+						slot.index(), false, "");
 			}
 
-			return new Step("Right-click to cancel", name + " · outbid or undercut", slot.index(), true, "");
+			// Nothing on the tooltip says an order is behind the book. The verdict is the live price on
+			// its own side, with 0.1 coins counting as a tick and the queue measured in units ahead.
+			FlipSession.BookPosition position = FlipSession.position(targetId, row.sellSide(), row.price(),
+					row.open());
+
+			if (position != null && !position.behind()) {
+				return new Step("Leave it listed", name + " · matching the top price", -1, false, "");
+			}
+
+			return new Step("Right-click to cancel", name + " · "
+					+ (position == null ? "re-price it" : position.reason(row.sellSide())), slot.index(), true,
+					"");
 		}
 
 		return new Step("Nothing listed for " + name, "place a buy order from the product page", -1, false, command);
@@ -588,11 +565,4 @@ public final class GuideEngine {
 				: String.format(Locale.ROOT, "%.1f", price);
 	}
 
-	private static int parse(String text) {
-		try {
-			return Integer.parseInt(text.replace(",", "").replace(".", "").trim());
-		} catch (NumberFormatException e) {
-			return 0;
-		}
-	}
 }

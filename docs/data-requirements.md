@@ -77,6 +77,13 @@ There is no `Filled:` line and no "claim" marker on the row.
 
 - `[Bazaar] Cancelling order...`
 - `[Bazaar] Cancelled! Refunded 89x Null Atom from cancelling Sell Offer!`
+- `[Bazaar] Buy Order Setup! 64x Magical Mushroom Soup for 2,937.6 coins.`
+- `[Bazaar] Sell Offer Setup! 64x Cobblestone for 113.8 coins.` — the figure is what you earn after tax,
+  the same number as the confirm screen's `You earn:`
+- `[Bazaar] Claimed 113.8 coins from selling 64x Cobblestone at 1.8 each!`
+
+`BazaarChat` parses the last three. The setup line is the only proof the server accepted an order, so
+it — not the confirm screen — is what charges the daily limit and records the order for the session.
 
 ### Stash
 
@@ -95,10 +102,18 @@ Sidebar line, read through the team prefix: `Purse: 622,458,473` → `purse=6224
 - a `debug.jsonl` line for `View Stash` itself (title confirmed by eye; the slot names and their counts
   have not been seen by the scanner yet)
 - the **sign editors** (not containers, cannot be logged)
-- the chat line after **creating** a buy/sell order
-- the chat line when **coins are claimed**
-- what an **outbid/undercut** order looks like (the rows captured were at the front)
 - the order list when it has more rows than fit (page arrows)
+
+### Outbid/undercut, answered
+
+There is **no lore line** that marks an order as outbid or undercut: the rows captured at the front
+look exactly like the ones behind them. The verdict is made against the live API instead. A sell offer
+is undercut when the best ask is at least 0.1 coins below its price; a buy order is overbid when the
+best bid is at least 0.1 coins above it. Matching the top price is not being behind it.
+
+`BazaarProduct.unitsAhead` then counts the queue the order actually sits behind: every unit priced
+better on its side, plus the other units at its own price (the API book already contains our order, so
+our open units are subtracted). `/bzassist orders` prints that alongside the relist verdict.
 
 ## 1. Screens to open, in this order
 
@@ -152,12 +167,13 @@ If any of these is wrong, the step that uses it silently fails. Tick the ones th
 
 ### Lore lines
 
-- [ ] order row: `SELL OFFER` or `BUY ORDER` somewhere in the row
-- [ ] order row: `Price Per Unit: 749,986.6 coins`
-- [ ] order row: `Offer amount: 89x`
-- [ ] order row: `Filled: 32` or `32/64` — **is there a filled line, and what is its exact wording?**
-- [ ] order row: anything that marks a claimable row (the word `Claim`?)
-- [ ] order row: anything that marks an order that has been outbid or undercut
+- [x] order row: the side is the **name prefix** (`SELL <name>` / `BUY <name>`), never the lore
+- [x] order row: `Price per unit: 749,986.8 coins`
+- [x] order row: `Offer amount: 11x`
+- [x] order row: **no** `Filled:` line in the capture
+- [x] order row: **no** claim marker in the capture
+- [x] order row: anything that marks an order that has been outbid or undercut — **nothing**; the
+      comparison is against the API's current best ask/bid, with 0.1 coins counting as one tick
 - [ ] order detail: the same price/amount lines, plus whatever the `Cancel` button says
 - [ ] confirm page: `Total price:` and `You earn:`
 - [ ] bazaar GUI: the line that prints `Bazaar Tax: 1.25%` (the mod reads any `n%` on any screen)
@@ -168,15 +184,17 @@ If any of these is wrong, the step that uses it silently fails. Tick the ones th
 
 Copy these verbatim from `latest.log` — the mod matches on words, so the exact wording matters:
 
-- [ ] creating a buy order: the line that appears after you confirm one
-- [ ] creating a sell offer: the same
-- [ ] a sale completing / claiming coins: the line with the coins in it
+- [x] creating a buy order: `[Bazaar] Buy Order Setup! 64x Magical Mushroom Soup for 2,937.6 coins.`
+- [x] creating a sell offer: `[Bazaar] Sell Offer Setup! 64x Cobblestone for 113.8 coins.`
+- [x] a sale completing / claiming coins: `[Bazaar] Claimed 113.8 coins from selling 64x Cobblestone at
+      1.8 each!`
 - [ ] `Claim All Coins`: the line(s) it prints
 - [ ] the daily limit: the line Hypixel sends when it refuses an order for the cap
 - [ ] not enough coins: the refusal line
 - [ ] `/viewstash item` empty: `Your item stash is empty!` (confirmed)
 - [ ] `/viewstash material` empty: `Your material stash is empty!` (confirmed)
-- [ ] anything printed when an order is outbid or undercut
+- [x] anything printed when an order is outbid or undercut: **nothing** — it is decided against the live
+      API (see "Outbid/undercut, answered")
 
 ## 3. Not covered by `debug.jsonl`
 

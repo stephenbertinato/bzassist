@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 
 import dev.bzassist.client.bazaar.BazaarApi;
+import dev.bzassist.client.bazaar.BazaarChat;
 import dev.bzassist.client.bazaar.BazaarConfig;
 import dev.bzassist.client.bazaar.BazaarScreenReader;
 import dev.bzassist.client.bazaar.Coins;
@@ -21,7 +22,6 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallba
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
 /** {@code /bzassist} — the console for everything the overlay shows. */
@@ -290,6 +290,24 @@ public final class BazaarCommands {
 		failures += check(source, "format 1234.5", Coins.format(1234.5).equals("1,234.5"), true);
 		failures += check(source, "compact 1.5b", Coins.compact(1.5E9).equals("1.50b"), true);
 		failures += check(source, "compact 12.3m", Coins.compact(12_345_678.0).equals("12.35m"), true);
+		// The exact lines the game printed, so a wording change fails here instead of silently stopping
+		// the daily limit and the session stats from being updated.
+		BazaarChat.OrderPlaced buy = BazaarChat.orderPlaced(
+				"[Bazaar] Buy Order Setup! 64x Magical Mushroom Soup for 2,937.6 coins.");
+		failures += check(source, "chat buy setup", buy != null && !buy.sellSide() && buy.units() == 64
+				&& Math.abs(buy.coins() - 2937.6) < 1.0E-6, true);
+		BazaarChat.OrderPlaced sell = BazaarChat.orderPlaced(
+				"[Bazaar] Sell Offer Setup! 64x Cobblestone for 113.8 coins.");
+		failures += check(source, "chat sell setup", sell != null && sell.sellSide() && sell.units() == 64
+				&& Math.abs(sell.coins() - 113.8) < 1.0E-6, true);
+		BazaarChat.Claimed claim = BazaarChat.claim(
+				"[Bazaar] Claimed 113.8 coins from selling 64x Cobblestone at 1.8 each!");
+		failures += check(source, "chat claim", claim != null && claim.units() == 64
+				&& Math.abs(claim.coins() - 113.8) < 1.0E-6
+				&& Math.abs(claim.unitPrice() - 1.8) < 1.0E-6, true);
+		failures += check(source, "chat ignores unrelated lines",
+				BazaarChat.orderPlaced("[Bazaar] Cancelling order...") == null
+						&& BazaarChat.claim("[Bazaar] Cancelled! Refunded 89x Null Atom!") == null, true);
 		send(source, failures == 0 ? "result" : "FAILED", failures == 0 ? "all checks passed" : failures + " check(s) failed");
 		return failures == 0 ? 1 : 0;
 	}
@@ -344,14 +362,14 @@ public final class BazaarCommands {
 			return 0;
 		}
 
-		Minecraft.getInstance().setScreenAndShow(new SummaryScreen());
+		SummaryScreen.open();
 		return 1;
 	}
 
 	/** An example summary, filled with the reference figures, for checking the screen in game. */
 	private static int devSummary(FabricClientCommandSource source) {
 		dev.bzassist.client.bazaar.SessionStats.demo();
-		Minecraft.getInstance().setScreenAndShow(new SummaryScreen());
+		SummaryScreen.open();
 		send(source, "summary", "showing the example summary");
 		return 1;
 	}

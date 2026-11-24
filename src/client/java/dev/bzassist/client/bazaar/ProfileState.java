@@ -128,7 +128,7 @@ public final class ProfileState {
 	/**
 	 * A confirm screen is open showing this order value. It is <b>not</b> spent yet: a click that the
 	 * server refuses (no coins, cap reached, screen closed) must not burn the cap. It is only added once
-	 * Hypixel confirms the order in chat, which is what {@link #confirmPendingOrder()} does.
+	 * Hypixel confirms the order in chat, which is what {@link #confirmOrder(double)} does.
 	 */
 	public static synchronized void noteOrderScreen(double orderValue) {
 		rollDay();
@@ -137,16 +137,23 @@ public final class ProfileState {
 		SessionLog.event("limit", "pending order value " + Math.round(pendingValue));
 	}
 
-	/** Hypixel confirmed an order in chat: the pending value is really spent. */
-	public static synchronized void confirmPendingOrder() {
+	/**
+	 * Hypixel confirmed an order in chat ({@code Buy Order Setup! …} / {@code Sell Offer Setup! …}).
+	 * The line carries the exact value, so that is what is charged: a confirm screen that was opened and
+	 * then closed is not an order, and the chat line is the only proof the server accepted one. This also
+	 * counts orders placed without the guide, which the pending value never saw.
+	 */
+	public static synchronized void confirmOrder(double coins) {
 		rollDay();
+		double value = coins > 0.0 ? coins : pendingValue;
 
-		if (pendingValue <= 0.0) {
+		if (value <= 0.0) {
+			SessionLog.event("limit", "order confirmed in chat with no readable value");
 			return;
 		}
 
-		spentToday += (long) Math.round(pendingValue);
-		SessionLog.event("limit", "confirmed " + Math.round(pendingValue) + " · spent today " + spentToday);
+		spentToday += (long) Math.round(value);
+		SessionLog.event("limit", "confirmed " + Math.round(value) + " · spent today " + spentToday);
 		pendingValue = 0.0;
 		pendingAt = 0L;
 		saveLimit();
@@ -186,8 +193,9 @@ public final class ProfileState {
 	}
 
 	/**
-	 * Reads a chat line for the two things only chat knows: an order that went through, and the server
-	 * saying the daily cap is gone.
+	 * Reads a chat line for what only chat knows here: the server saying the daily cap is gone, or a
+	 * refusal that means the pending confirm screen never became an order. Order confirmations
+	 * themselves are parsed by {@link BazaarChat}, which also carries the value.
 	 */
 	public static void noteChat(String text) {
 		if (text == null || text.isBlank()) {
@@ -206,14 +214,8 @@ public final class ProfileState {
 			return;
 		}
 
-		boolean created = (lower.contains("created") || lower.contains("placed") || lower.contains("success"))
-				&& (lower.contains("buy order") || lower.contains("sell offer"));
-
-		if (created) {
-			confirmPendingOrder();
-			return;
-		}
-
+		// Order confirmations are read by BazaarChat: "Buy Order Setup!" is the wording the game
+		// actually uses, and it carries the value, so it cannot be matched by a "created" keyword.
 		boolean refused = lower.contains("cannot afford") || lower.contains("can't afford")
 				|| lower.contains("not enough coins") || lower.contains("don't have enough")
 				|| lower.contains("not enough money");

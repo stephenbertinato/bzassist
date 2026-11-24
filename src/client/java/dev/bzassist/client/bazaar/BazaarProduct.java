@@ -78,6 +78,38 @@ public record BazaarProduct(
 		return Math.min(quantityAtAsk(), quantityAtBid());
 	}
 
+	/**
+	 * Units standing in front of one of our orders at {@code price}: every unit priced better on the same
+	 * side, plus the other units at that exact price. The API book already contains our own order, so
+	 * {@code ownOpenUnits} is subtracted from the level at our price; without that an order alone at the
+	 * front would report itself as its own queue.
+	 *
+	 * <p>The API exposes 30 levels per side, so an order priced below the visible book sees only the
+	 * units inside those levels — an undercount, never an overcount.</p>
+	 *
+	 * @param sellSide    true for a sell offer (asks), false for a buy order (bids)
+	 * @param price       our price per unit
+	 * @param ownOpenUnits how much of our order is still open
+	 */
+	public long unitsAhead(boolean sellSide, double price, long ownOpenUnits) {
+		return unitsAhead(sellSide ? asks : bids, price, sellSide, Math.max(0L, ownOpenUnits));
+	}
+
+	private static long unitsAhead(List<OrderLevel> levels, double price, boolean sellSide, long ownOpenUnits) {
+		long better = 0L;
+		long atPrice = 0L;
+
+		for (OrderLevel level : levels) {
+			if (Math.abs(level.pricePerUnit() - price) < 1.0E-4) {
+				atPrice += level.amount();
+			} else if (sellSide ? level.pricePerUnit() < price : level.pricePerUnit() > price) {
+				better += level.amount();
+			}
+		}
+
+		return better + Math.max(0L, atPrice - ownOpenUnits);
+	}
+
 	/** Coins per unit from buying at the best ask and selling into the best bid, after bazaar tax. */
 	public double flipMargin(double taxFraction) {
 		double ask = bestAsk();

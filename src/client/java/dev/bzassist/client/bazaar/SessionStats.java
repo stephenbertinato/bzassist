@@ -9,11 +9,14 @@ import java.util.Map;
 /**
  * What one session actually did, for the summary screen.
  *
- * <p>Fed by the confirm screens the guide already reads: a buy order adds to a product's spend, a sell
- * offer adds to its earnings and realises the profit after tax against the average cost of the units
- * bought. Profit is also posted to {@link ProfileState#addProfit(double)}, so the HUD's session figure
- * and this summary always agree. A cumulative-profit series is sampled every five seconds to draw the
- * chart.</p>
+ * <p>Fed by the chat lines Hypixel prints when an order is really created ({@code Buy Order Setup!} /
+ * {@code Sell Offer Setup!}) and when a sale is claimed ({@code Claimed … from selling …}): a buy order
+ * adds to a product's spend, a claim realises the profit after tax against the average cost of the
+ * units bought. A confirm screen that was opened and closed is not counted. Profit is also posted to
+ * {@link ProfileState#addProfit(double)}, so the HUD's session figure and this summary agree. A claim
+ * whose units cannot be matched to bought units (stock bought before the session, or no buy order at
+ * all) is kept as revenue with no cost basis: it still counts in Total Revenue and is reported, but it
+ * never adds to profit. A cumulative-profit series is sampled every five seconds to draw the chart.</p>
  */
 public final class SessionStats {
 	private static final long SAMPLE_MS = 5_000L;
@@ -29,8 +32,15 @@ public final class SessionStats {
 		private int soldOrders;
 		private int boughtUnits;
 		private int soldUnits;
+		/** Bought units whose cost has already been matched to a claim, and the cost of those units. */
+		private int costedUnits;
+		private double costedSpend;
 		private double spent;
+		/** Total coins claimed for this product, and how much of that had a known cost basis. */
 		private double earned;
+		private double pricedRevenue;
+		/** Claimed coins with no cost basis in this session; visible, but never profit. */
+		private double unpricedRevenue;
 
 		private Product(String id, String name) {
 			this.id = id;
@@ -53,8 +63,19 @@ public final class SessionStats {
 			return soldOrders;
 		}
 
+		/** Realised profit: only revenue with a known cost basis counts. */
 		public double profit() {
-			return earned - spent;
+			return pricedRevenue - spent;
+		}
+
+		/** Total coins claimed for this product, priced or not. */
+		public double revenue() {
+			return earned;
+		}
+
+		/** Claimed coins that had no cost basis in this session. */
+		public double unpricedRevenue() {
+			return unpricedRevenue;
 		}
 
 		public double unitCost() {
@@ -69,8 +90,11 @@ public final class SessionStats {
 	private static long lastSample;
 	private static double profit;
 	private static double spent;
+	private static double revenue;
+	private static double unpricedRevenue;
 	private static int buys;
 	private static int sells;
+	private static int pricedSells;
 	private static int profitableSells;
 	private static boolean demo;
 
@@ -85,8 +109,11 @@ public final class SessionStats {
 		lastSample = startedAt;
 		profit = 0.0;
 		spent = 0.0;
+		revenue = 0.0;
+		unpricedRevenue = 0.0;
 		buys = 0;
 		sells = 0;
+		pricedSells = 0;
 		profitableSells = 0;
 		demo = false;
 		SERIES.add(new Point(0L, 0.0));
@@ -118,15 +145,21 @@ public final class SessionStats {
 	}
 
 	/**
-	 * One order the guide confirmed. {@code total} is the order value from the confirm screen; a sell is
-	 * netted against the average cost of the units bought and its profit is posted to the session.
+	 * One order Hypixel confirmed in chat. {@code total} is the figure from that line; a sell is netted
+	 * against the average cost of the units bought and its profit is posted when the coins are claimed.
 	 */
 	public static void order(String id, String name, boolean buy, int units, double total) {
-		if (id == null || total <= 0.0) {
+		if (total <= 0.0 || startedAt <= 0L || endedAt > 0L) {
 			return;
 		}
 
-		Product product = PRODUCTS.computeIfAbsent(id, key -> new Product(key, name == null ? key : name));
+		String key = id != null && !id.isBlank() ? id : name;
+
+		if (key == null || key.isBlank()) {
+			return;
+		}
+
+		Product product = PRODUCTS.computeIfAbsent(key, ignored -> new Product(key, name == null ? key : name));
 		int quantity = Math.max(1, units);
 
 		if (buy) {
@@ -145,71 +178,100 @@ public final class SessionStats {
 	}
 
 	/**
-	 * A sale that actually happened: the chat line that says coins arrived. Profit is only counted here,
-	 * for the units that were claimed, against the average cost of the units bought.
+	 * A sale that actually happened: the chat line that says coins arrived
+	 * ({@code Claimed 113.8 coins from selling 64x Cobblestone at 1.8 each!}).
+	 *
+	 * <p>The revenue is split by units into the part that has a cost basis this session (bought units
+	 * not already matched to an earlier claim) and the part that does not (bought before the session, or
+	 * no buy order recorded at all). Only the priced part can produce profit; the unpriced part is added
+	 * to {@link #unpricedRevenue()} and shown in the report and the summary, never as a gain. Counting
+	 * the whole claim as profit was the old behaviour and made a sale from existing stock look like pure
+	 * earnings.</p>
+	 *
+	 * <p>The product is found by id first and by the printed name second, so a listing made in an earlier
+	 * session still lands on the right row.</p>
 	 */
-	public static void claim(String text) {
-		if (text == null || text.isBlank() || startedAt <= 0L || endedAt > 0L) {
+	public static void claim(String id, String name, int units, double coins) {
+		if (coins <= 0.0 || startedAt <= 0L || endedAt > 0L) {
 			return;
 		}
 
-		String lower = text.toLowerCase(Locale.ROOT);
-
-		if (!lower.contains("coin")) {
-			return;
-		}
-
-		if (!lower.contains("sold") && !lower.contains("selling") && !lower.contains("earned")
-				&& !lower.contains("claimed") && !lower.contains("you received")) {
-			return;
-		}
-
-		java.util.regex.Matcher money = java.util.regex.Pattern
-				.compile("([\\d,]+(?:\\.\\d+)?)\\s*coins").matcher(lower);
-		java.util.regex.Matcher amount = java.util.regex.Pattern
-				.compile("(\\d[\\d,]*)\\s*x\\b").matcher(lower);
-
-		if (!money.find()) {
-			return;
-		}
-
-		double revenue = Math.max(0.0, Coins.parse(money.group(1)));
-
-		if (revenue <= 0.0) {
-			return;
-		}
-
-		int units = amount.find() ? (int) Math.max(1L, Math.round(Coins.parse(amount.group(1)))) : 0;
-		Product product = productIn(lower);
+		Product product = product(id, name);
+		int claimed = Math.max(0, units);
+		int pricedUnits = 0;
+		double pricedRevenue = 0.0;
 		double cost = 0.0;
 
-		if (product != null) {
-			int claimed = units > 0 ? Math.min(units, Math.max(1, product.boughtUnits)) : 1;
-			cost = claimed * product.unitCost();
-			product.soldUnits += units;
-			product.earned += revenue;
+		if (product != null && claimed > 0) {
+			int available = Math.max(0, product.boughtUnits - product.costedUnits);
+			pricedUnits = Math.min(claimed, available);
+			// Use the cost of the units still unmatched, not the average of every unit ever bought:
+			// a later, more expensive buy must not re-price stock that was already accounted for.
+			double remainingCost = Math.max(0.0, product.spent - product.costedSpend);
+			double unitCost = available > 0 ? remainingCost / available : 0.0;
+			pricedRevenue = coins * pricedUnits / claimed;
+			cost = pricedUnits * unitCost;
+			product.costedUnits += pricedUnits;
+			product.costedSpend += cost;
 		}
 
-		double gain = revenue - cost;
+		double unpriced = coins - pricedRevenue;
+		double gain = pricedRevenue - cost;
+
+		if (product != null) {
+			product.soldUnits += claimed;
+			product.earned += coins;
+			product.pricedRevenue += pricedRevenue;
+			product.unpricedRevenue += unpriced;
+		}
+
 		sells++;
+		revenue += coins;
+		unpricedRevenue += unpriced;
 		profit += gain;
+
+		if (pricedUnits > 0) {
+			pricedSells++;
+		}
 
 		if (gain > 0.0) {
 			profitableSells++;
 		}
 
 		ProfileState.addProfit(gain);
-		SessionLog.event("claim", String.format(Locale.ROOT, "%s%s for %s → profit %s",
-				units > 0 ? units + "x " : "", product == null ? "item" : product.name(),
-				Coins.compact(revenue), Coins.compact(gain)));
+		SessionLog.event("claim", String.format(Locale.ROOT, "%s%s for %s → profit %s%s",
+				units > 0 ? units + "x " : "",
+				product == null ? (name == null ? "item" : name) : product.name(),
+				Coins.compact(coins), Coins.compact(gain),
+				unpriced > 0.0 ? " · " + Coins.compact(unpriced) + " revenue with no cost basis" : ""));
 		lastSample = 0L;
 		sample();
 	}
 
-	/** The traded product a chat line is about, by its display name. */
-	private static Product productIn(String lower) {
+	/** The traded product a claim is about: by id first, then by the display name in the chat line. */
+	private static Product product(String id, String name) {
+		if (id != null) {
+			Product byId = PRODUCTS.get(id);
+
+			if (byId != null) {
+				return byId;
+			}
+		}
+
+		if (name == null || name.isBlank()) {
+			return null;
+		}
+
+		String key = name.toLowerCase(Locale.ROOT);
+
 		for (Product product : PRODUCTS.values()) {
-			if (!product.name().isBlank() && lower.contains(product.name().toLowerCase(Locale.ROOT))) {
+			if (!product.name().isBlank() && product.name().toLowerCase(Locale.ROOT).contains(key)) {
+				return product;
+			}
+		}
+
+		for (Product product : PRODUCTS.values()) {
+			if (!product.name().isBlank() && key.contains(product.name().toLowerCase(Locale.ROOT))) {
 				return product;
 			}
 		}
@@ -225,14 +287,17 @@ public final class SessionStats {
 		endedAt = System.currentTimeMillis();
 		spent = 1_918_000_000.0;
 		profit = 245_700_000.0;
+		revenue = 2_163_700_000.0;
 		buys = 184;
 		sells = 186;
+		pricedSells = 186;
 		profitableSells = 183;
 
 		Product best = new Product("NECRON_HANDLE", "Necron's Blade");
 		best.soldOrders = 3;
 		best.soldUnits = 3;
 		best.earned = 48_700_000.0;
+		best.pricedRevenue = 48_700_000.0;
 		best.spent = 0.0;
 		PRODUCTS.put(best.id(), best);
 
@@ -277,6 +342,16 @@ public final class SessionStats {
 		return profit;
 	}
 
+	/** All coins claimed in the session, including sales with no cost basis. */
+	public static double revenue() {
+		return revenue;
+	}
+
+	/** Claimed coins that could not be matched to a cost basis; never part of {@link #profit()}. */
+	public static double unpricedRevenue() {
+		return unpricedRevenue;
+	}
+
 	public static double spent() {
 		return spent;
 	}
@@ -294,7 +369,7 @@ public final class SessionStats {
 	}
 
 	public static double successRate() {
-		return sells > 0 ? profitableSells / (double) sells : 0.0;
+		return pricedSells > 0 ? profitableSells / (double) pricedSells : 0.0;
 	}
 
 	public static double netMargin() {
@@ -302,7 +377,7 @@ public final class SessionStats {
 	}
 
 	public static double averageProfitPerSale() {
-		return sells > 0 ? profit / sells : 0.0;
+		return pricedSells > 0 ? profit / pricedSells : 0.0;
 	}
 
 	public static List<Point> series() {

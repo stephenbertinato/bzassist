@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.google.gson.JsonArray;
@@ -90,7 +91,7 @@ public final class ItemNames {
 
 		String learned = LEARNED.get(id);
 
-		if (learned != null) {
+		if (learned != null && !isUiLabel(learned)) {
 			return strip(learned);
 		}
 
@@ -129,7 +130,9 @@ public final class ItemNames {
 
 		String clean = strip(displayName).trim();
 
-		if (clean.isEmpty() || clean.equals(derived(id))) {
+		// A button label is not an item name. Learning "Sell Offer" or "SELL Cobblestone" as a product
+		// name used to turn the guide's search term into /bz Sell Offer, an item that does not exist.
+		if (clean.isEmpty() || clean.equals(derived(id)) || isUiLabel(clean)) {
 			return;
 		}
 
@@ -139,6 +142,29 @@ public final class ItemNames {
 
 		saveLearned();
 	}
+
+	/**
+	 * True for a label printed on a bazaar button, preset or order row — never a product name. The order
+	 * rows are titled {@code SELL <item>} / {@code BUY <item>}, so their prefixes are excluded too.
+	 */
+	public static boolean isUiLabel(String text) {
+		String lower = strip(text).trim().toLowerCase(Locale.ROOT);
+
+		if (lower.isEmpty() || UI_NAMES.contains(lower)) {
+			return true;
+		}
+
+		return lower.startsWith("sell ") || lower.startsWith("buy ");
+	}
+
+	/** Screen and button labels that must never be mistaken for a bazaar product. */
+	private static final Set<String> UI_NAMES = Set.of(
+			"buy instantly", "sell instantly", "create buy order", "create sell offer",
+			"buy order", "sell offer", "confirm buy order", "confirm sell offer",
+			"custom amount", "custom price", "same as top order", "same as best offer",
+			"top order +0.1", "best offer -0.1", "5% of spread", "10% of spread",
+			"go back", "back", "close", "claim all coins", "cancel order", "manage orders",
+			"order options", "view stash", "bazaar", "get me a stack");
 
 	/** Finds a bazaar product id from something the player typed: an id or any part of the name. */
 	public static String idFor(String query) {
@@ -623,8 +649,24 @@ public final class ItemNames {
 				properties.load(in);
 			}
 
+			int dropped = 0;
+
 			for (String key : properties.stringPropertyNames()) {
-				LEARNED.put(key, properties.getProperty(key));
+				String value = properties.getProperty(key);
+
+				// Older builds learned whatever slot was on screen, buttons included. Purge those entries
+				// rather than letting them produce a search command for an item that does not exist.
+				if (isUiLabel(value)) {
+					dropped++;
+					continue;
+				}
+
+				LEARNED.put(key, value);
+			}
+
+			if (dropped > 0) {
+				BzAssist.LOGGER.warn("Dropped {} learned name(s) that were really UI labels", dropped);
+				saveLearned();
 			}
 		} catch (IOException e) {
 			BzAssist.LOGGER.warn("Could not read {}", LEARNED_FILE, e);

@@ -3,6 +3,33 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.2.9] - 2026-11-24
+
+### Fixed
+
+- Confirmed bazaar orders and claims are read from the real chat lines (`Buy Order Setup!`,
+  `Sell Offer Setup!`, `Claimed … from selling …`), so a screen opened and closed without ordering is
+  no longer counted, and the daily limit is charged from the figure chat printed.
+- Undercut and overbid are judged against the live order book with the 0.1-coin tick: matching the top
+  price is not behind, 0.1 coins or more is, and the HUD, order list and log show how many units and
+  people are in front.
+- Order rows are parsed from their real `SELL <item>` / `BUY <item>` titles, so the guide can find,
+  reprice and cancel its own orders instead of looking for a side in the lore.
+- `/bz Sell Offer` and similar invented commands are gone: button labels and order-row titles are no
+  longer learned as product names, polluted `learned-names.properties` entries are dropped on load, and
+  a `/bz` command containing a UI label is refused.
+- The relist step no longer vanishes after one tick. The one-minute cooldown starts when an order is
+  actually taken on, not while deciding, and the `Cancel Order` step stays until the order is gone.
+- The session summary opens after any session that recorded an order or a claim, and from
+  `/bzassist summary`; it is opened on the next client tick so the closing chat screen cannot erase it.
+
+### Changed
+
+- A claim with no cost basis no longer counts its whole revenue as profit. Coins from stock bought
+  before the session, or with no buy order recorded, are still included in Total Revenue and shown as
+  `No Cost Basis` in the summary and the session log, but they are not added to profit, the profit
+  chart, the HUD session figure, average profit per sale or the flip success rate.
+
 ## [1.2.8] - 2026-11-23
 
 ### Changed

@@ -217,13 +217,8 @@ public final class BazaarScreenReader {
 			}
 		}
 
-		// Any product on screen teaches us its real name.
-		for (BazaarView.SlotView slot : scanned.slots()) {
-			if (!slot.itemId().isEmpty()) {
-				ItemNames.learn(slot.itemId(), slot.name());
-			}
-		}
-
+		// Only the product page teaches a name. Learning every slot also learned the buttons and the
+		// order rows ("Sell Offer", "SELL Cobblestone"), which then became the search command.
 		if (scanned.kind() == BazaarView.Kind.PRODUCT) {
 			String name = BazaarView.productName(scanned.title());
 			BazaarView.SlotView chosen = scanned.withLore("the item you have chosen");

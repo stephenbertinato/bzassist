@@ -43,6 +43,8 @@ Before you start: Minecraft 26.2 with Fabric Loader, `fabric-api-0.161.0+26.2.ja
 Use something cheap you do not mind owning.
 
 - [ ] `/bzassist plan <cheap item>`. Press `T`: the chat box is pre-filled with `/bz <name>`; press Enter.
+- [ ] That pre-fill is always `/bz <item>`, `/managebazaarorders` or `/viewstash item|material`, and the
+      item is a real bazaar product — never `/bz Sell Offer` or `/bz SELL Cobblestone`.
 - [ ] The search results page appears; the correct product slot is outlined (and the term is a substring,
       so enchantments work: "Smoldering", not "Smoldering 6").
 - [ ] Click the product: `Create Buy Order` is highlighted.
@@ -91,9 +93,10 @@ Use something cheap you do not mind owning.
 
 - [ ] `/bzassist dev summary` → the example summary opens: four stat cards, the profit chart, best and
       worst item with real item icons, key stats. It fades in, and Esc closes it.
-- [ ] After a session that made money, stopping with `F6` opens the real summary by itself.
+- [ ] After a session that recorded any order or claim, stopping with `F6` opens the real summary by
+      itself.
 - [ ] `/bzassist summary` reopens the last one.
-- [ ] A session that lost money does **not** open anything.
+- [ ] A session that recorded nothing does **not** open anything.
 
 ## 9. The limit wall (optional, burns the cap)
 

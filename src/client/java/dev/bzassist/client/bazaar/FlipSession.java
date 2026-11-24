@@ -6,8 +6,6 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
-import net.minecraft.client.Minecraft;
-
 import dev.bzassist.client.SummaryScreen;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,13 +36,6 @@ public final class FlipSession {
 		PLACE
 	}
 
-	/** One row of our own order list. */
-	public record OwnOrder(String id, String name, boolean sellSide, double price, int filled, int total) {
-		public int open() {
-			return Math.max(total - filled, 0);
-		}
-	}
-
 	/**
 	 * How cheap the limit has to be compared with profit when deciding to re-price. The gain from moving
 	 * to the front is weighed against the limit re-spending one placement costs; at 0.25 a coin of limit
@@ -61,13 +52,12 @@ public final class FlipSession {
 	/** When each side of each product was last sent to be relisted, keyed by id and side. */
 	private static final Map<String, Long> LAST_RELISTED = new HashMap<>();
 
-	private static final Pattern SPLIT = Pattern.compile("(\\d[\\d,]*)\\s*/\\s*(\\d[\\d,]*)");
-	/** "Offer amount: 89x" as the order rows print it when nothing has filled yet. */
-	private static final Pattern OFFER_AMOUNT =
-			Pattern.compile("(?:offer|order)?\\s*amount\\s*:?\\s*(\\d[\\d,]*)");
-	private static final Pattern FILLED = Pattern.compile("filled\\s*:?\\s*(\\d[\\d,]*)");
-	private static final Pattern UNIT_PRICE = Pattern.compile("price per unit\\s*:?\\s*(\\d[\\d,]*(?:\\.\\d+)?)");
-	private static final Pattern MONEY = Pattern.compile("(\\d[\\d,]*(?:\\.\\d+)?)");
+	/**
+	 * The smallest gap to the top of the book that counts as being behind it. Bazaar prices move in
+	 * 0.1-coin ticks, so a rival who merely matches your price has not undercut you; one tick has.
+	 */
+	private static final double PRICE_TICK = 0.1;
+	private static final double PRICE_EPSILON = 1.0E-4;
 
 	private static Phase lastPhase = Phase.OFF;
 	private static int sampleTicks;
@@ -75,10 +65,10 @@ public final class FlipSession {
 	private static boolean relistOnly;
 	private static volatile Phase phase = Phase.OFF;
 	private static volatile String note = "off";
-	private static final List<OwnOrder> own = new ArrayList<>();
+	private static final List<OrderRow> own = new ArrayList<>();
 	private static int cursor;
 	private static int stashStage;
-	private static OwnOrder cancelling;
+	private static OrderRow cancelling;
 
 	private FlipSession() {
 	}
@@ -122,6 +112,7 @@ public final class FlipSession {
 
 	private static void start(boolean relistOnly) {
 		own.clear();
+		cancelling = null;
 		cursor = 0;
 		stashStage = 0;
 		lastPhase = Phase.OFF;
@@ -159,21 +150,21 @@ public final class FlipSession {
 
 		if (!wasRelistOnly) {
 			GuideEngine.clear();
-			showSummaryIfProfitable();
+			showSummary();
 		}
 	}
 
-	/** The summary only opens when the session actually made money; a losing session stays quiet. */
-	private static void showSummaryIfProfitable() {
-		if (SessionStats.profit() <= 0.0) {
+	/**
+	 * Opens the summary whenever the session recorded an order or a claim. A session that did nothing
+	 * stays quiet; one that ended with stock still listed now still gets its figures (the old profit
+	 * gate hid exactly those sessions, because committed buy orders count as spend until they sell).
+	 */
+	private static void showSummary() {
+		if (!SessionStats.hasData()) {
 			return;
 		}
 
-		try {
-			Minecraft.getInstance().setScreenAndShow(new SummaryScreen());
-		} catch (RuntimeException exception) {
-			SessionLog.failure("summary open", exception);
-		}
+		SummaryScreen.open();
 	}
 
 	public static void tick() {
@@ -246,133 +237,71 @@ public final class FlipSession {
 		own.clear();
 
 		for (BazaarView.SlotView slot : view.slots()) {
-			String name = slot.name();
-			String lower = name.toLowerCase(Locale.ROOT);
-			String lore = slot.loreText();
-			// Order rows are titled "SELL Broken Radar" / "BUY Null Atom"; the side is the prefix.
-			boolean sellSide = lower.startsWith("sell ") || lore.contains("sell offer");
-			boolean buySide = lower.startsWith("buy ") || lore.contains("buy order");
+			OrderRow row = OrderRow.parse(slot);
 
-			if (!sellSide && !buySide) {
+			if (row == null) {
 				continue;
 			}
 
-			String id = idOfOrder(slot);
-
-			if (id == null) {
-				SessionLog.event("orders", "unreadable row: '" + name + "' | "
+			if (!row.readable()) {
+				SessionLog.event("orders", "unreadable row: '" + slot.name() + "' | "
 						+ (slot.lore().isEmpty() ? "no lore" : slot.lore().get(0)));
 				continue;
 			}
 
-			int total = Math.max(1, slot.count());
-			int filled = 0;
-			Matcher split = SPLIT.matcher(lore);
-			Matcher amount = OFFER_AMOUNT.matcher(lore);
-			Matcher filledLine = FILLED.matcher(lore);
-
-			if (split.find()) {
-				filled = number(split.group(1));
-				total = Math.max(filled, number(split.group(2)));
-			} else if (amount.find()) {
-				total = Math.max(1, number(amount.group(1)));
-			}
-
-			if (filledLine.find()) {
-				filled = Math.max(filled, number(filledLine.group(1)));
-			}
-
-			double price = priceOf(slot);
-			own.add(new OwnOrder(id, ItemNames.name(id), sellSide, price, filled, total));
+			own.add(row);
 			SessionLog.event("orders", String.format(Locale.ROOT, "%s %s @%.1f %d/%d",
-					sellSide ? "SELL" : "BUY", ItemNames.name(id), price, filled, total));
+					row.sellSide() ? "SELL" : "BUY", row.name(), row.price(), row.filled(), row.total()));
 		}
-	}
-
-	/**
-	 * The product an order row is about. The game prints the SkyBlock id on the item itself
-	 * ({@code NULL_ATOM}), which is also the bazaar id, so that is tried first; the name and then the lore
-	 * are the fallbacks.
-	 */
-	private static String idOfOrder(BazaarView.SlotView slot) {
-		String itemId = slot.itemId();
-
-		if (itemId != null && !itemId.isBlank() && BazaarApi.snapshot().get(itemId) != null) {
-			return itemId;
-		}
-
-		String id = ItemNames.idForScreenName(slot.name());
-
-		if (id == null) {
-			id = ItemNames.idFor(slot.name());
-		}
-
-		if (id == null) {
-			for (String line : slot.lore()) {
-				id = ItemNames.idFor(line);
-
-				if (id != null) {
-					break;
-				}
-			}
-		}
-
-		return id;
-	}
-
-	/**
-	 * The price of one unit. Order rows print both "Price per unit: 12.4k" and "Total price: 793.6k", so
-	 * taking the largest number on the lore — as this used to — read the total as the unit price and made
-	 * every order look like it was already at the top of the book. The unit price line wins; otherwise the
-	 * smallest plausible number is used.
-	 */
-	private static double priceOf(BazaarView.SlotView slot) {
-		// "Price Per Unit: 749,986.6 coins" — the exact line, whatever the capitalisation.
-		Matcher unit = UNIT_PRICE.matcher(slot.loreText());
-
-		if (unit.find()) {
-			double parsed = Coins.parse(unit.group(1));
-
-			if (parsed > 0.0) {
-				return parsed;
-			}
-		}
-
-		double smallest = 0.0;
-
-		for (String line : slot.lore()) {
-			String lower = line.toLowerCase(Locale.ROOT);
-			boolean perUnit = lower.contains("per unit") || lower.contains("each");
-
-			Matcher money = MONEY.matcher(line);
-
-			while (money.find()) {
-				double value;
-
-				try {
-					value = Double.parseDouble(money.group(1).replace(",", ""));
-				} catch (NumberFormatException ignored) {
-					continue;
-				}
-
-				if (value <= 0.0) {
-					continue;
-				}
-
-				if (perUnit) {
-					return value;
-				}
-
-				smallest = smallest <= 0.0 ? value : Math.min(smallest, value);
-			}
-		}
-
-		return smallest;
 	}
 
 	private static void relist(BazaarView view) {
+		// An order whose detail screen is open stays the instruction: Cancel is the next click, and the
+		// step must not be replaced on the following tick by whatever phase comes next.
+		if (cancelling != null) {
+			if (view.kind() == BazaarView.Kind.ORDER_DETAIL) {
+				BazaarView.SlotView cancelButton = findCancel(view);
+
+				if (cancelButton == null) {
+					push(new GuideEngine.Step("Press Esc", "back to your orders", -1, false, ""));
+					return;
+				}
+
+				note = "confirming the cancel";
+				push(new GuideEngine.Step("Click Cancel",
+						cancelling.name() + " · " + worthWaitingNote(cancelling), cancelButton.index(), false, ""));
+				return;
+			}
+
+			if (view.kind() == BazaarView.Kind.ORDERS) {
+				// Back on the list: a row that is still there was not cancelled (Esc), so keep working
+				// on it. One that has gone did cancel, so drop it and start again from the top.
+				if (rowFor(view, cancelling) != null) {
+					cursor = Math.max(0, own.indexOf(cancelling));
+				} else {
+					int index = own.indexOf(cancelling);
+
+					if (index >= 0) {
+						own.remove(index);
+					}
+
+					cancelling = null;
+					cursor = 0;
+				}
+			} else {
+				// Chat, a sign or Esc closed the screen for a moment. The order is still ours and still
+				// not cancelled: keep it and ask for the list back instead of dropping the step.
+				push(escAware(view, "Back to your orders", "open /managebazaarorders again",
+						"/managebazaarorders"));
+				return;
+			}
+		} else if (view.kind() == BazaarView.Kind.ORDER_DETAIL) {
+			// An order opened by hand: the guide's own recovery step knows the way back.
+			return;
+		}
+
 		while (cursor < own.size()) {
-			OwnOrder order = own.get(cursor);
+			OrderRow order = own.get(cursor);
 
 			if (!needsRelist(order)) {
 				cursor++;
@@ -393,21 +322,6 @@ public final class FlipSession {
 				return;
 			}
 
-			// Cancelling is two clicks: the order row, then the Cancel button on the order screen.
-			BazaarView.SlotView cancelButton = findCancel(view);
-
-			if (cancelButton != null) {
-				if (cancelling != null) {
-					own.remove(cancelling);
-					cancelling = null;
-				}
-
-				note = "confirming the cancel";
-				push(new GuideEngine.Step("Click Cancel", order.name() + " · " + worthWaitingNote(order),
-						cancelButton.index(), false, ""));
-				return;
-			}
-
 			BazaarView.SlotView row = rowFor(view, order);
 
 			if (row == null) {
@@ -416,8 +330,14 @@ public final class FlipSession {
 			}
 
 			cancelling = order;
+			// The cooldown starts when the order is actually taken on, not when someone merely asks
+			// "/bzassist orders" why it would or would not move.
+			LAST_RELISTED.put(key(order), System.currentTimeMillis());
+			BookPosition position = position(order.id(), order.sellSide(), order.price(), order.open());
 			note = order.name() + " · " + (order.sellSide() ? "undercut" : "overbid");
-			push(new GuideEngine.Step("Click " + order.name(), "then click Cancel · " + worthWaitingNote(order),
+			push(new GuideEngine.Step("Click " + order.name(),
+					"then click Cancel" + (position == null ? "" : " · " + position.aheadText()) + " · "
+							+ worthWaitingNote(order),
 					row.index(), false, ""));
 			return;
 		}
@@ -546,20 +466,19 @@ public final class FlipSession {
 	}
 
 	/**
-	 * True when re-pricing earns more than the limit it re-spends. It is not a fixed wait: the decision
-	 * compares the profit per hour of sitting behind the queue with the profit per hour of being at the
-	 * front, over a day, against the limit one more placement costs.
-	 */
-	/**
-	 * True when this order — however it got there, bought this session or ten hours ago — is no longer at
-	 * the front of the book and should be re-priced.
+	 * True when this order — however it got there, bought this session or ten hours ago — is at least one
+	 * price tick behind the book and should be re-priced. The order being handled right now always counts:
+	 * its step has to stay on screen until the row is clicked.
 	 *
-	 * <p>The old rule only relisted when an hourly-profit formula beat the limit it re-spent, which meant a
-	 * long-standing order that had been undercut into irrelevance stayed exactly where it was. The rule now
-	 * is the one a player uses: if you are not at the top, move. What still gates it is the cap (do not
-	 * spend limit you do not have) and a one-minute cooldown per order (never cancel-loop).</p>
+	 * <p>There is no lore marker for an undercut or overbid order, so the comparison is made against the
+	 * live API on the order's own side. What gates a move is the cap (do not spend limit you do not have)
+	 * and a one-minute cooldown per order (never cancel-loop).</p>
 	 */
-	private static boolean needsRelist(OwnOrder order) {
+	private static boolean needsRelist(OrderRow order) {
+		if (cancelling != null && cancelling.equals(order)) {
+			return true;
+		}
+
 		return relistReason(order) == null;
 	}
 
@@ -567,7 +486,7 @@ public final class FlipSession {
 	 * Why this order should not be relisted, or {@code null} when it should. Every branch is reported, so
 	 * `/bzassist orders` and the session report can answer "why didn't it move my order?" without a guess.
 	 */
-	private static String relistReason(OwnOrder order) {
+	private static String relistReason(OrderRow order) {
 		BazaarProduct product = BazaarApi.snapshot().get(order.id());
 
 		if (product == null) {
@@ -582,20 +501,18 @@ public final class FlipSession {
 			return "nothing left open (fully filled)";
 		}
 
-		double best = order.sellSide() ? product.bestAsk() : product.bestBid();
+		BookPosition position = position(product, order.sellSide(), order.price(), order.open());
 
-		if (best <= 0.0) {
+		if (position == null) {
 			return "the book has no " + (order.sellSide() ? "ask" : "bid") + " price";
 		}
 
-		boolean behind = order.sellSide() ? order.price() > best : order.price() < best;
-
-		if (!behind) {
-			return String.format(Locale.ROOT, "already at the front (%.1f vs %.1f)", order.price(), best);
+		if (!position.behind()) {
+			return String.format(Locale.ROOT, "not behind the book (%.1f vs %.1f)", order.price(),
+					position.best());
 		}
 
-		String key = order.id() + (order.sellSide() ? "|sell" : "|buy");
-		Long last = LAST_RELISTED.get(key);
+		Long last = LAST_RELISTED.get(key(order));
 
 		if (last != null && System.currentTimeMillis() - last < RELIST_COOLDOWN_MS) {
 			return "relisted less than a minute ago";
@@ -607,10 +524,15 @@ public final class FlipSession {
 			return "not enough daily limit left to move it";
 		}
 
-		LAST_RELISTED.put(key, System.currentTimeMillis());
-		SessionLog.event("relist", String.format(Locale.ROOT, "%s %s %.1f vs book %.1f · %d open",
-				order.name(), order.sellSide() ? "undercut" : "overbid", order.price(), best, order.open()));
+		SessionLog.event("relist", String.format(Locale.ROOT,
+				"%s %s %.1f vs book %.1f (%.1f behind) · %s · %d open",
+				order.name(), order.sellSide() ? "undercut" : "overbid", order.price(), position.best(),
+				position.gap(), position.aheadText(), order.open()));
 		return null;
+	}
+
+	private static String key(OrderRow order) {
+		return order.id() + (order.sellSide() ? "|sell" : "|buy");
 	}
 
 	/** Everything the order reader parsed, plus the relist verdict for each row. Used by `/bzassist orders`. */
@@ -632,42 +554,67 @@ public final class FlipSession {
 			}
 		}
 
-		for (OwnOrder order : own) {
+		for (OrderRow order : own) {
 			String reason = relistReason(order);
-			lines.add(String.format(Locale.ROOT, "%s %s @%.1f %d/%d -> %s",
+			BookPosition position = position(order.id(), order.sellSide(), order.price(), order.open());
+			lines.add(String.format(Locale.ROOT, "%s %s @%.1f %d/%d -> %s%s",
 					order.sellSide() ? "SELL" : "BUY", order.name(), order.price(), order.filled(), order.total(),
-					reason == null ? "RELIST" : reason));
+					reason == null ? "RELIST" : reason,
+					position == null ? "" : " · " + position.aheadText()));
 		}
 
 		return lines;
 	}
 
-	private static String worthWaitingNote(OwnOrder order) {
+	private static String worthWaitingNote(OrderRow order) {
 		return order.filled() > 0 ? order.filled() + " of " + order.total() + " filled" : "nothing filled yet";
 	}
 
-	private static double unitsAtOrBelow(List<OrderLevel> levels, double price) {
-		double total = 0.0;
-
-		for (OrderLevel level : levels) {
-			if (level.pricePerUnit() <= price) {
-				total += level.amount();
-			}
+	/**
+	 * Where one of our orders sits against the live book.
+	 *
+	 * @param behind     true when a rival is at least {@link #PRICE_TICK} better priced
+	 * @param best       the best price on our side, our own order included
+	 * @param gap        how much worse our price is than {@code best}, in coins
+	 * @param unitsAhead units priced better, plus the other units at our own price
+	 */
+	public record BookPosition(boolean behind, double best, double gap, long unitsAhead) {
+		public String aheadText() {
+			return String.format(Locale.ROOT, "%,d %s ahead", unitsAhead, unitsAhead == 1 ? "unit" : "units");
 		}
 
-		return total;
+		public String reason(boolean sellSide) {
+			if (!behind) {
+				return String.format(Locale.ROOT, "matching the top price (%.1f)", best);
+			}
+
+			return String.format(Locale.ROOT, "%s by %.1f · %s", sellSide ? "undercut" : "overbid", gap,
+					aheadText());
+		}
 	}
 
-	private static double unitsAtOrAbove(List<OrderLevel> levels, double price) {
-		double total = 0.0;
+	/** Prices one of our rows against the live book, or null when there is no book for it yet. */
+	public static BookPosition position(String id, boolean sellSide, double price, int openUnits) {
+		return position(BazaarApi.snapshot().get(id), sellSide, price, openUnits);
+	}
 
-		for (OrderLevel level : levels) {
-			if (level.pricePerUnit() >= price) {
-				total += level.amount();
-			}
+	private static BookPosition position(BazaarProduct product, boolean sellSide, double price, int openUnits) {
+		if (product == null || price <= 0.0) {
+			return null;
 		}
 
-		return total;
+		double best = sellSide ? product.bestAsk() : product.bestBid();
+
+		if (best <= 0.0) {
+			return null;
+		}
+
+		// Sell offers are behind when something asks less; buy orders when something bids more. A gap of
+		// 0.1 coins is one full tick and counts; merely matching the top price does not.
+		double gap = sellSide ? price - best : best - price;
+		boolean behind = gap >= PRICE_TICK - PRICE_EPSILON;
+		long ahead = product.unitsAhead(sellSide, price, Math.max(0, openUnits));
+		return new BookPosition(behind, best, Math.max(0.0, gap), ahead);
 	}
 
 	/** The Cancel button on the order screen; Hypixel usually draws it as terracotta. */
@@ -683,7 +630,7 @@ public final class FlipSession {
 		return null;
 	}
 
-	private static BazaarView.SlotView rowFor(BazaarView view, OwnOrder order) {
+	private static BazaarView.SlotView rowFor(BazaarView view, OrderRow order) {
 		for (BazaarView.SlotView slot : view.slots()) {
 			if (order.id().equals(slot.itemId()) || order.id().equals(ItemNames.idForScreenName(slot.name()))) {
 				return slot;
@@ -733,7 +680,7 @@ public final class FlipSession {
 
 		int openBuys = 0;
 
-		for (OwnOrder order : own) {
+		for (OrderRow order : own) {
 			if (!order.sellSide() && order.open() > 0) {
 				openBuys++;
 			}
@@ -741,7 +688,7 @@ public final class FlipSession {
 
 		int openSells = 0;
 
-		for (OwnOrder order : own) {
+		for (OrderRow order : own) {
 			if (order.sellSide()) {
 				openSells++;
 			}
@@ -790,7 +737,7 @@ public final class FlipSession {
 	}
 
 	private static boolean ordered(String id) {
-		for (OwnOrder order : own) {
+		for (OrderRow order : own) {
 			if (order.id().equals(id)) {
 				return true;
 			}

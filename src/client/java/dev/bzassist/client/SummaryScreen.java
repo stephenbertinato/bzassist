@@ -9,6 +9,7 @@ import dev.bzassist.client.bazaar.ItemIcons;
 import dev.bzassist.client.bazaar.SessionLog;
 import dev.bzassist.client.bazaar.SessionStats;
 import dev.bzassist.client.font.FontRenderer;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -44,6 +45,23 @@ public final class SummaryScreen extends Screen {
 
 	public SummaryScreen() {
 		super(Component.literal("Session Summary"));
+	}
+
+	/**
+	 * Opens the summary on the next client tick. A command runs while the chat screen is still up, and
+	 * that screen closes itself as soon as the command returns; opening the summary synchronously is
+	 * undone immediately, which is why {@code /bzassist summary} appeared to do nothing.
+	 */
+	public static void open() {
+		Minecraft minecraft = Minecraft.getInstance();
+		minecraft.execute(() -> {
+			try {
+				minecraft.setScreenAndShow(new SummaryScreen());
+			} catch (RuntimeException exception) {
+				SessionLog.failure("summary open", exception);
+				BzAssist.LOGGER.error("Could not open the session summary", exception);
+			}
+		});
 	}
 
 	@Override
@@ -147,8 +165,8 @@ public final class SummaryScreen extends Screen {
 				signedPercent(SessionStats.netMargin() * 100.0)};
 		String[] subs = {
 				"≈ " + signedPerHour(SessionStats.profit() / Math.max(elapsedHours, 1.0E-6)),
-				"≈ " + Coins.compact(SessionStats.sells() * SessionStats.averageProfitPerSale()
-						/ Math.max(elapsedHours, 1.0E-6)) + "/h",
+				"≈ " + Coins.compact(SessionStats.revenue() / Math.max(elapsedHours, 1.0E-6))
+						+ "/h revenue",
 				"≈ " + Coins.compact(SessionStats.spent() / Math.max(elapsedHours, 1.0E-6)) + "/h",
 				""};
 		boolean[] green = {SessionStats.profit() >= 0.0, false, false, SessionStats.netMargin() >= 0.0};
@@ -282,12 +300,14 @@ public final class SummaryScreen extends Screen {
 		FontRenderer.draw(graphics, "Key Stats", x(statsX + 12), y(top + 18), sz(9), alpha(TITLE, a));
 
 		String[][] rows = {
+				{"Total Revenue", Coins.compact(SessionStats.revenue())},
 				{"Average Profit / Sale", Coins.compact(SessionStats.averageProfitPerSale())},
 				{"Flip Success Rate", String.format(Locale.ROOT, "%.1f%%", SessionStats.successRate() * 100.0)},
-				{"Total Flips", Integer.toString(SessionStats.flips())}};
+				{"No Cost Basis", Coins.compact(SessionStats.unpricedRevenue())}};
+		int rowCount = SessionStats.unpricedRevenue() > 0.0 ? rows.length : rows.length - 1;
 
-		for (int i = 0; i < rows.length; i++) {
-			float rowY = top + 34.0F + i * 17.0F;
+		for (int i = 0; i < rowCount; i++) {
+			float rowY = top + 30.0F + i * 15.0F;
 			FontRenderer.draw(graphics, rows[i][0], x(statsX + 12), y(rowY), sz(8), alpha(MUTED, a));
 			FontRenderer.draw(graphics, rows[i][1],
 					x(statsX + width - 12) - FontRenderer.measure(rows[i][1], sz(8)), y(rowY), sz(8),
