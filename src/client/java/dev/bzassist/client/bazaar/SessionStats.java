@@ -96,6 +96,12 @@ public final class SessionStats {
 	private static int sells;
 	private static int pricedSells;
 	private static int profitableSells;
+	/**
+	 * Orders Hypixel has confirmed this session, buy and sell. The session watches this to know when the
+	 * plan it is guiding has actually been placed, so it can move on to the next product instead of
+	 * sitting on one flip forever.
+	 */
+	private static int placedOrders;
 	private static boolean demo;
 
 	private SessionStats() {
@@ -115,6 +121,7 @@ public final class SessionStats {
 		sells = 0;
 		pricedSells = 0;
 		profitableSells = 0;
+		placedOrders = 0;
 		demo = false;
 		SERIES.add(new Point(0L, 0.0));
 	}
@@ -161,6 +168,7 @@ public final class SessionStats {
 
 		Product product = PRODUCTS.computeIfAbsent(key, ignored -> new Product(key, name == null ? key : name));
 		int quantity = Math.max(1, units);
+		placedOrders++;
 
 		if (buy) {
 			buys++;
@@ -248,9 +256,46 @@ public final class SessionStats {
 		sample();
 	}
 
+	/**
+	 * Items taken out of a buy order: {@code Claimed 6x X worth …, bought for …}.
+	 *
+	 * <p>This is the missing half of the cost basis. A claim for units the session never saw bought —
+	 * stock ordered before it started, or an order placed outside the guide — now gets its cost from the
+	 * line itself instead of counting as "no cost basis" forever. The sell that follows can then produce
+	 * a real profit instead of pure revenue.</p>
+	 */
+	public static void claimItems(String id, String name, int units, double paid, double worth) {
+		if (units <= 0 || startedAt <= 0L || endedAt > 0L) {
+			return;
+		}
+
+		String key = id != null && !id.isBlank() ? id : name;
+
+		if (key == null || key.isBlank()) {
+			return;
+		}
+
+		Product product = PRODUCTS.computeIfAbsent(key, ignored -> new Product(key, name == null ? key : name));
+		int unmatched = Math.max(0, product.boughtUnits - product.costedUnits);
+		int missing = Math.max(0, units - unmatched);
+
+		if (missing > 0 && paid > 0.0) {
+			double cost = paid * missing / (double) units;
+			product.boughtUnits += missing;
+			product.boughtOrders++;
+			product.spent += cost;
+			spent += cost;
+		}
+
+		SessionLog.event("claim", String.format(Locale.ROOT, "%dx %s claimed from a buy order%s%s", units,
+				product.name(), paid > 0.0 ? " · cost " + Coins.compact(paid) : "",
+				worth > 0.0 ? " · worth " + Coins.compact(worth) : ""));
+		lastSample = 0L;
+		sample();
+	}
+
 	/** The traded product a claim is about: by id first, then by the display name in the chat line. */
-	private static Product product(String id, String name) {
-		if (id != null) {
+	private static Product product(String id, String name) {		if (id != null) {
 			Product byId = PRODUCTS.get(id);
 
 			if (byId != null) {
@@ -366,6 +411,11 @@ public final class SessionStats {
 
 	public static int flips() {
 		return buys + sells;
+	}
+
+	/** Orders Hypixel confirmed since the session began, both sides. */
+	public static int placedOrders() {
+		return placedOrders;
 	}
 
 	public static double successRate() {

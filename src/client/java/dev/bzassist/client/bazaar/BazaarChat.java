@@ -27,7 +27,18 @@ public final class BazaarChat {
 					+ "([\\d,]+(?:\\.\\d+)?)\\s*coins?\\.?\\s*$");
 	private static final Pattern CLAIM = Pattern.compile(
 			"(?i)\\[bazaar]\\s+claimed\\s+([\\d,]+(?:\\.\\d+)?)\\s*coins?\\s+from\\s+selling\\s+"
-					+ "([\\d,]+)\\s*x\\s+(.+?)(?:\\s+at\\s+([\\d,]+(?:\\.\\d+)?)\\s*each)?[.!]?\\s*$");
+					+ "([\\d,]+)\\s*x\\s+(.+?)(?:\\s+at\\s+([\\d,]+(?:\\.\\d+)?)(?:\\s*coins?)?\\s*each)?[.!]?\\s*$");
+	/**
+	 * Claiming <b>items</b> out of a buy order, as opposed to coins out of a sale:
+	 * {@code [Bazaar] Claimed 6x Null Atom worth 123,456 coins bought for 120,000 coins}. Only the count
+	 * and the name are required, because the two money figures are what the wording is least certain
+	 * about — but when they are printed they are the real cost basis of those units, which is exactly the
+	 * number the profit can never be reconstructed without.
+	 */
+	private static final Pattern ITEMS_CLAIMED = Pattern.compile(
+			"(?i)\\[bazaar]\\s+claimed\\s+([\\d,]+)\\s*x\\s+(.+?)"
+					+ "(?:\\s*,?\\s+worth\\s+([\\d,]+(?:\\.\\d+)?)\\s*(?:coins?)?)?"
+					+ "(?:\\s*,?\\s+bought\\s+for\\s+([\\d,]+(?:\\.\\d+)?)\\s*(?:coins?)?)?[.!]?\\s*$");
 
 	/** One order Hypixel confirmed: "Buy Order Setup! 64x X for 2,937.6 coins." */
 	public record OrderPlaced(boolean sellSide, int units, String itemName, String itemId, double coins) {
@@ -35,6 +46,10 @@ public final class BazaarChat {
 
 	/** One sale Hypixel paid out: "Claimed 113.8 coins from selling 64x X at 1.8 each!" */
 	public record Claimed(double coins, int units, String itemName, String itemId, double unitPrice) {
+	}
+
+	/** Items taken out of a buy order: "Claimed 6x X worth …, bought for …". */
+	public record ItemsClaimed(int units, String itemName, String itemId, double worth, double paid) {
 	}
 
 	private BazaarChat() {
@@ -45,7 +60,9 @@ public final class BazaarChat {
 		OrderPlaced placed = orderPlaced(line);
 
 		if (placed != null) {
-			ProfileState.confirmOrder(placed.coins());
+			// A sell offer's figure is what the player earns after tax, but the daily limit is charged on
+			// the order's value, so the gross is put back before it is counted.
+			ProfileState.confirmOrder(placed.sellSide() ? grossOf(placed.coins()) : placed.coins());
 			SessionStats.order(placed.itemId(), placed.itemName(), !placed.sellSide(), placed.units(),
 					placed.coins());
 			SessionLog.event("bazaar", String.format(Locale.ROOT, "%s %sx %s for %s",
@@ -58,10 +75,49 @@ public final class BazaarChat {
 
 		if (claimed != null) {
 			SessionStats.claim(claimed.itemId(), claimed.itemName(), claimed.units(), claimed.coins());
+			FlipSession.noteClaimed();
 			SessionLog.event("bazaar", String.format(Locale.ROOT, "claimed %s from %sx %s at %s each",
 					Coins.format(claimed.coins()), claimed.units(), claimed.itemName(),
 					Coins.format(claimed.unitPrice())));
+			return;
 		}
+
+		ItemsClaimed items = itemsClaimed(line);
+
+		if (items != null) {
+			SessionStats.claimItems(items.itemId(), items.itemName(), items.units(), items.paid(),
+					items.worth());
+			FlipSession.noteClaimed();
+		}
+	}
+
+	/**
+	 * Parses the line Hypixel prints when items are taken out of a buy order, or null. Checked after the
+	 * coin claim, whose wording ("coins from selling") can never be mistaken for this one.
+	 */
+	public static ItemsClaimed itemsClaimed(String line) {
+		Matcher matcher = ITEMS_CLAIMED.matcher(clean(line));
+
+		if (!matcher.find()) {
+			return null;
+		}
+
+		String name = matcher.group(2).trim();
+		String lower = name.toLowerCase(Locale.ROOT);
+
+		if (lower.contains(" coins") || lower.startsWith("coins")) {
+			return null;
+		}
+
+		int units = whole(matcher.group(1));
+		double worth = matcher.group(3) == null ? 0.0 : Coins.parse(matcher.group(3));
+		double paid = matcher.group(4) == null ? 0.0 : Coins.parse(matcher.group(4));
+
+		if (units <= 0 || name.isEmpty()) {
+			return null;
+		}
+
+		return new ItemsClaimed(units, name, ItemNames.idFor(name), worth, paid);
 	}
 
 	/** Parses a buy/sell order setup line, or null when the line is something else. */
@@ -102,6 +158,12 @@ public final class BazaarChat {
 		}
 
 		return new Claimed(coins, units, name, ItemNames.idFor(name), unitPrice);
+	}
+
+	/** The order value behind a post-tax sell figure: {@code net / (1 - tax)}. */
+	private static double grossOf(double net) {
+		double keep = 1.0 - Math.max(0.0, Math.min(0.5, BazaarConfig.taxFraction()));
+		return keep <= 0.0 ? net : net / keep;
 	}
 
 	private static String clean(String line) {

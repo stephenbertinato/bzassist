@@ -49,8 +49,24 @@ public final class FlipSession {
 	/** One relist per order per minute: a re-read of the same row must not turn into a cancel loop. */
 	private static final long RELIST_COOLDOWN_MS = 60_000L;
 
+	/**
+	 * Ticks spent asking for the same stash stack before moving on. Half a minute is long enough to click
+	 * and short enough that a stack which cannot be collected never traps the player on one slot.
+	 */
+	private static final int STASH_PATIENCE_TICKS = 600;
+
 	/** When each side of each product was last sent to be relisted, keyed by id and side. */
 	private static final Map<String, Long> LAST_RELISTED = new HashMap<>();
+
+	/**
+	 * Products this session has already placed a buy order for. The order list is only re-read every
+	 * couple of minutes, so without this the very next ranking could pick the same item again and stack
+	 * two identical orders instead of filling another slot with something else.
+	 */
+	private static final java.util.Set<String> PLACED = new java.util.HashSet<>();
+
+	/** How long the session keeps placing before it goes back to re-read the order list. */
+	private static final long SCAN_INTERVAL_MS = 120_000L;
 
 	/**
 	 * The smallest gap to the top of the book that counts as being behind it. Bazaar prices move in
@@ -68,6 +84,13 @@ public final class FlipSession {
 	private static final List<OrderRow> own = new ArrayList<>();
 	private static int cursor;
 	private static int stashStage;
+	private static int stashSlot = -1;
+	private static int stashTicks;
+	/** Orders placed at the moment the current plan was made, so the session can tell it went through. */
+	private static int placedAtPlan;
+	/** When the order list was last read, and whether a claim has arrived since. */
+	private static long lastScanAt;
+	private static boolean claimsSeen;
 	private static OrderRow cancelling;
 
 	private FlipSession() {
@@ -83,6 +106,21 @@ public final class FlipSession {
 
 	public static boolean active() {
 		return phase != Phase.OFF;
+	}
+
+	/** True while this session is in the middle of cancelling one of its own orders. */
+	public static boolean wantsCancel() {
+		return phase == Phase.RELIST && cancelling != null;
+	}
+
+	/**
+	 * Hypixel paid out a claim: items or coins. The next pass collects and lists them, so the session
+	 * stops placing long enough to do the housekeeping instead of drifting on one product.
+	 */
+	static void noteClaimed() {
+		if (phase != Phase.OFF) {
+			claimsSeen = true;
+		}
 	}
 
 	/** How many of our own orders the last scan found. */
@@ -112,9 +150,14 @@ public final class FlipSession {
 
 	private static void start(boolean relistOnly) {
 		own.clear();
+		PLACED.clear();
+		claimsSeen = false;
+		lastScanAt = System.currentTimeMillis();
 		cancelling = null;
 		cursor = 0;
 		stashStage = 0;
+		stashSlot = -1;
+		stashTicks = 0;
 		lastPhase = Phase.OFF;
 		sampleTicks = 0;
 		FlipSession.relistOnly = relistOnly;
@@ -123,6 +166,9 @@ public final class FlipSession {
 
 		if (!relistOnly) {
 			SessionStats.begin();
+			// The HUD's session figure and clock belong to the session, not to the game: they restart
+			// with F6 instead of accumulating for as long as the client has been open.
+			ProfileState.resetSession();
 		}
 
 		phase = Phase.SCAN;
@@ -193,6 +239,18 @@ public final class FlipSession {
 
 		BazaarView view = BazaarScreenReader.view();
 
+		// A claim means there is stock to collect, and the order list is only a snapshot: every couple of
+		// minutes, and whenever a claim lands, PLACE hands back to SCAN instead of placing forever on an
+		// increasingly stale picture. The old machine never returned, which is why one order filled the
+		// whole session.
+		if (phase == Phase.PLACE && (claimsSeen || System.currentTimeMillis() - lastScanAt > SCAN_INTERVAL_MS)) {
+			claimsSeen = false;
+			phase = Phase.SCAN;
+			note = "re-reading your orders";
+			SessionLog.event("phase", "PLACE -> SCAN (housekeeping)");
+			return;
+		}
+
 		switch (phase) {
 			case SCAN -> scan(view);
 			case RELIST -> relist(view);
@@ -212,6 +270,7 @@ public final class FlipSession {
 		}
 
 		read(view);
+		lastScanAt = System.currentTimeMillis();
 
 		if (own.isEmpty()) {
 			if (relistOnly) {
@@ -336,7 +395,7 @@ public final class FlipSession {
 			BookPosition position = position(order.id(), order.sellSide(), order.price(), order.open());
 			note = order.name() + " · " + (order.sellSide() ? "undercut" : "overbid");
 			push(new GuideEngine.Step("Click " + order.name(),
-					"then click Cancel" + (position == null ? "" : " · " + position.aheadText()) + " · "
+					"then click Cancel Order" + (position == null ? "" : " · " + position.aheadText()) + " · "
 							+ worthWaitingNote(order),
 					row.index(), false, ""));
 			return;
@@ -400,6 +459,23 @@ public final class FlipSession {
 				continue;
 			}
 
+			if (slot.index() == stashSlot) {
+				stashTicks++;
+			} else {
+				stashSlot = slot.index();
+				stashTicks = 0;
+			}
+
+			if (stashTicks > STASH_PATIENCE_TICKS) {
+				// Half a minute on one stack: either it will not fit, or it was collected without the row
+				// changing. Moving on beats trapping the player on a slot that never completes.
+				SessionLog.event("stash", "gave up on slot " + slot.index() + " after " + stashTicks + " ticks");
+				stashSlot = -1;
+				stashTicks = 0;
+				advanceStash();
+				return;
+			}
+
 			note = "collecting " + ItemNames.name(id);
 			push(new GuideEngine.Step("Click to collect " + ItemNames.name(id),
 					"x" + units + " · then press Esc", slot.index(), false, ""));
@@ -443,6 +519,9 @@ public final class FlipSession {
 
 	/** Material stash checked first, then the item stash, then move on. */
 	private static void advanceStash() {
+		stashSlot = -1;
+		stashTicks = 0;
+
 		if (stashStage == 0) {
 			stashStage = 1;
 			// The item answer must not be taken as the answer to the material question.
@@ -539,10 +618,13 @@ public final class FlipSession {
 	public static List<String> describeOrders() {
 		List<String> lines = new ArrayList<>();
 		BazaarView view = BazaarScreenReader.view();
+		// Read the screen in front of the player, not the last session's snapshot: the command has to
+		// answer "what does the reader see right now" even when no session has ever run.
+		List<OrderRow> rows = own.isEmpty() && view.kind() == BazaarView.Kind.ORDERS ? rowsOf(view) : own;
 		lines.add("screen: " + view.kind() + " '" + view.title() + "' with " + view.slots().size() + " slots");
-		lines.add("parsed: " + own.size() + " order(s)");
+		lines.add("parsed: " + rows.size() + " order(s)");
 
-		if (own.isEmpty()) {
+		if (rows.isEmpty()) {
 			int shown = 0;
 
 			for (BazaarView.SlotView slot : view.slots()) {
@@ -550,11 +632,12 @@ public final class FlipSession {
 					break;
 				}
 
-				lines.add("row: '" + slot.name() + "' -> " + ItemNames.idForScreenName(slot.name()));
+				lines.add("row: '" + slot.name() + "' -> " + ItemNames.idForScreenName(slot.name())
+						+ " · side=" + sideOf(slot) + " · price=" + OrderRow.priceOf(slot));
 			}
 		}
 
-		for (OrderRow order : own) {
+		for (OrderRow order : rows) {
 			String reason = relistReason(order);
 			BookPosition position = position(order.id(), order.sellSide(), order.price(), order.open());
 			lines.add(String.format(Locale.ROOT, "%s %s @%.1f %d/%d -> %s%s",
@@ -564,6 +647,27 @@ public final class FlipSession {
 		}
 
 		return lines;
+	}
+
+	/** The order rows of one view, without touching the session's own list. */
+	private static List<OrderRow> rowsOf(BazaarView view) {
+		List<OrderRow> rows = new ArrayList<>();
+
+		for (BazaarView.SlotView slot : view.slots()) {
+			OrderRow row = OrderRow.parse(slot);
+
+			if (row != null && row.readable()) {
+				rows.add(row);
+			}
+		}
+
+		return rows;
+	}
+
+	/** "SELL", "BUY" or "-" for one slot, for the `/bzassist orders` diagnostics. */
+	private static String sideOf(BazaarView.SlotView slot) {
+		OrderRow row = OrderRow.parse(slot);
+		return row == null ? "-" : row.sellSide() ? "SELL" : "BUY";
 	}
 
 	private static String worthWaitingNote(OrderRow order) {
@@ -657,7 +761,10 @@ public final class FlipSession {
 			return;
 		}
 
-		GuideEngine.plan(flip);
+		// List exactly what is in the bag. A sell-only plan can no longer ask for more of it to be bought,
+		// which the old shared plan did whenever the bag held fewer units than a fresh position wanted.
+		GuideEngine.planSell(flip, ProfileState.unitsHeld(holding));
+		placedAtPlan = SessionStats.placedOrders();
 		phase = Phase.PLACE;
 		note = "listing " + ItemNames.name(holding);
 	}
@@ -695,7 +802,9 @@ public final class FlipSession {
 		}
 
 		// Dynamic, not a fixed reserve: every sell offer we actually have takes a slot, and two more are
-		// held back so a fill always has somewhere to go. Holding stock in the bag costs nothing.
+		// held back so a fill always has somewhere to go. Holding stock in the bag costs nothing. Orders
+		// placed since the last scan count as open buys, or the budget would never fill up between scans.
+		openBuys = Math.max(openBuys, PLACED.size());
 		int budget = Math.max(1, BazaarConfig.orderSlots() - openSells - 2);
 
 		if (openBuys >= budget) {
@@ -705,8 +814,34 @@ public final class FlipSession {
 		}
 
 		if (GuideEngine.targetId() != null) {
-			// The guide already owns an item: let it drive the click-by-click steps.
-			return;
+			// One plan at a time, but not forever. Once Hypixel confirms the order in chat the plan has
+			// done its job and the next product can be chosen; a sell-only plan clears the same way. A
+			// buy plan whose product stopped being tradable is dropped too, so a dead market cannot pin
+			// the session on one item.
+			String plannedId = GuideEngine.targetId();
+			boolean sellPlan = GuideEngine.isSellOnly();
+			boolean placed = SessionStats.placedOrders() > placedAtPlan;
+
+			if (!placed) {
+				if (sellPlan) {
+					return;
+				}
+
+				BazaarProduct planned = BazaarApi.snapshot().get(plannedId);
+
+				if (planned != null && FlipEngine.evaluate(planned) != null) {
+					return;
+				}
+
+				SessionLog.event("place", plannedId + " is no longer tradable; re-picking");
+			} else if (!sellPlan) {
+				// Remembered so the next ranking pass cannot choose the same product again before the
+				// order list has been re-read.
+				PLACED.add(plannedId);
+				SessionLog.event("place", plannedId + " placed; moving to the next product");
+			}
+
+			GuideEngine.clear();
 		}
 
 		for (Flip flip : FlipEngine.rank(12)) {
@@ -723,6 +858,7 @@ public final class FlipSession {
 			}
 
 			GuideEngine.plan(flip);
+			placedAtPlan = SessionStats.placedOrders();
 			note = "next: " + flip.name();
 			return;
 		}
@@ -737,6 +873,10 @@ public final class FlipSession {
 	}
 
 	private static boolean ordered(String id) {
+		if (PLACED.contains(id)) {
+			return true;
+		}
+
 		for (OrderRow order : own) {
 			if (order.id().equals(id)) {
 				return true;

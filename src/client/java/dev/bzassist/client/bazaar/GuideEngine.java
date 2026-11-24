@@ -46,6 +46,11 @@ public final class GuideEngine {
 	private static volatile int buyOpenUnits;
 	private static volatile int buyClaimableUnits;
 	private static volatile Step step = Step.NONE;
+	/** Set by the session's SELL phase: list what is in the bag, never buy more of it. */
+	private static volatile boolean sellOnly;
+	private static volatile int sellUnits;
+	/** The row the guide just told the player to open, so that "Cancel Order" is the next step. */
+	private static volatile String pendingCancelId;
 	private static String lastConfirm = "";
 
 	private GuideEngine() {
@@ -89,9 +94,14 @@ public final class GuideEngine {
 		return sellOfferQuantity;
 	}
 
+	/** True while the plan only lists units already in the bag and never buys more of them. */
+	public static boolean isSellOnly() {
+		return sellOnly;
+	}
+
 	/** Units still to buy: plan minus held, minus listed for sale, minus open buy orders. */
 	public static int needBuy() {
-		if (targetId == null) {
+		if (targetId == null || sellOnly) {
 			return 0;
 		}
 
@@ -110,7 +120,7 @@ public final class GuideEngine {
 		BazaarView view = BazaarScreenReader.lastContainer();
 
 		if (view.kind() == BazaarView.Kind.QUANTITY) {
-			return Integer.toString(Math.max(1, needBuy()));
+			return Integer.toString(sellOnly ? Math.max(1, sellUnits) : Math.max(1, needBuy()));
 		}
 
 		if (view.kind() == BazaarView.Kind.PRICE) {
@@ -130,13 +140,30 @@ public final class GuideEngine {
 		buyOrderQuantity = 0;
 		buyOpenUnits = 0;
 		buyClaimableUnits = 0;
+		sellOnly = false;
+		sellUnits = 0;
 		lastConfirm = "";
 		step = Step.NONE;
+	}
+
+	/**
+	 * A plan that only sells: {@code units} already in the bag are listed at the flip's sell price and
+	 * nothing is bought. The session uses this after collecting the stash, where the old code planned a
+	 * fresh position and could ask for more units to be bought instead of listing what was already there.
+	 */
+	public static void planSell(Flip flip, int units) {
+		plan(flip);
+		sellUnits = Math.max(1, units);
+		targetQuantity = sellUnits;
+		sellOnly = true;
 	}
 
 	public static void clear() {
 		targetId = null;
 		targetQuantity = 0;
+		sellOnly = false;
+		sellUnits = 0;
+		pendingCancelId = null;
 		targetBuyPrice = 0.0;
 		targetSellPrice = 0.0;
 		sellOfferQuantity = 0;
@@ -159,6 +186,11 @@ public final class GuideEngine {
 		}
 
 		BazaarView view = BazaarScreenReader.view();
+
+		if (view.kind() != BazaarView.Kind.ORDER_DETAIL) {
+			// The order screen was left, so no row is waiting to be cancelled any more.
+			pendingCancelId = null;
+		}
 
 		if (view.kind() == BazaarView.Kind.ORDERS) {
 			readOwnOrders(view);
@@ -287,7 +319,8 @@ public final class GuideEngine {
 			case PRICE -> price(view, name, need);
 			case CONFIRM -> confirm(view, need);
 			case ORDERS -> orders(view, name, command);
-			case STASH, ORDER_DETAIL -> recovery(view, name, command);
+			case ORDER_DETAIL -> orderDetail(view, name, command);
+			case STASH -> recovery(view, name, command);
 		};
 	}
 
@@ -371,26 +404,37 @@ public final class GuideEngine {
 	 * misspelled fragment a derived name can produce.
 	 */
 	private static String openCommand(String id, String name) {
-		String term = ItemNames.searchTerm(id);
+		String[] candidates = { ItemNames.searchTerm(id), ItemNames.commandSafe(name),
+				id.toLowerCase(Locale.ROOT).replace('_', ' ') };
 
-		if (!term.isEmpty() && !ItemNames.isUiLabel(term) && names(term, id)) {
-			return "/bz " + term;
+		for (String candidate : candidates) {
+			if (resolvesTo(candidate, id)) {
+				return "/bz " + candidate.trim();
+			}
 		}
 
-		String full = ItemNames.commandSafe(name);
-
-		if (!full.isEmpty() && !ItemNames.isUiLabel(full) && names(full, id)) {
-			return "/bz " + full;
-		}
-
-		String fromId = id.toLowerCase(Locale.ROOT).replace('_', ' ').trim();
-		return fromId.isEmpty() || ItemNames.isUiLabel(fromId) ? "/bz" : "/bz " + fromId;
+		// Nothing here resolves to this product: bare /bz opens the bazaar, which is never wrong and
+		// never types an item name that does not exist.
+		return "/bz";
 	}
 
-	/** True when the term resolves to this product (or to any product at all, for a partial name). */
-	private static boolean names(String term, String id) {
-		String resolved = ItemNames.idFor(term);
-		return resolved != null && (resolved.equals(id) || term.length() >= 4);
+	/**
+	 * True when this exact term finds this exact product. The bazaar's search is a substring match, so a
+	 * term that resolves to the right id is safe to type; anything else would search for an item that is
+	 * not in the game, which is how "/bz Chum Fishinng" happened.
+	 */
+	private static boolean resolvesTo(String term, String id) {
+		if (term == null) {
+			return false;
+		}
+
+		String text = term.trim();
+
+		if (text.isEmpty() || ItemNames.isUiLabel(text)) {
+			return false;
+		}
+
+		return id.equals(ItemNames.idFor(text));
 	}
 
 	private static double roundTick(double value) {
@@ -428,6 +472,19 @@ public final class GuideEngine {
 	}
 
 	private static Step product(BazaarView view, String name, int held, int need) {
+		if (sellOnly) {
+			// The session is emptying the bag, not building a position: it must never buy more of it.
+			if (held > 0 && sellOfferQuantity < held) {
+				return slot(view, "Create Sell Offer", "list " + held + " " + name);
+			}
+
+			if (sellOfferQuantity > 0) {
+				return new Step("Wait", name + " · " + sellOfferQuantity + " listed for sale", -1, false, "");
+			}
+
+			return new Step("Wait", name + " · nothing left to list", -1, false, "");
+		}
+
 		if (need > 0) {
 			double cost = need * targetBuyPrice;
 			double purse = ProfileState.purseKnown() ? ProfileState.purse() : -1.0;
@@ -507,8 +564,9 @@ public final class GuideEngine {
 			}
 
 			// Claim first: a finished order is dead weight, and claiming it is what lets the sell offer go
-			// up for the whole quantity at once. A row is only claimable when something actually filled.
-			if (row.filled() > 0 || slot.loreContains("claim")) {
+			// up for the whole quantity at once. Only a BUY order has items waiting in it — a sell offer
+			// holds our items, it never produces any, and offering "claim" on one was wrong.
+			if (!row.sellSide() && row.filled() > 0) {
 				return new Step("Left-click to claim", name + " · " + row.filled() + " filled",
 						slot.index(), false, "");
 			}
@@ -522,12 +580,33 @@ public final class GuideEngine {
 				return new Step("Leave it listed", name + " · matching the top price", -1, false, "");
 			}
 
-			return new Step("Right-click to cancel", name + " · "
-					+ (position == null ? "re-price it" : position.reason(row.sellSide())), slot.index(), true,
-					"");
+			// Cancelling is two clicks: the row, then "Cancel Order" on the order's own screen. The old
+			// "right-click to cancel" instruction described a flow the game does not have.
+			pendingCancelId = targetId;
+			return new Step("Click " + slot.name(),
+					"then click Cancel Order · " + (position == null ? "re-price it"
+							: position.reason(row.sellSide())), slot.index(), false, "");
 		}
 
 		return new Step("Nothing listed for " + name, "place a buy order from the product page", -1, false, command);
+	}
+
+	/**
+	 * One order's own screen ("Order options"), which is where the cancel button lives.
+	 *
+	 * <p>It is only outlined when this row is the one the guide sent the player to, or when the session is
+	 * mid-relist on it: an order opened out of curiosity must never be suggested for cancellation.</p>
+	 */
+	private static Step orderDetail(BazaarView view, String name, String command) {
+		boolean wanted = pendingCancelId != null || FlipSession.wantsCancel();
+		BazaarView.SlotView cancel = wanted ? find(view, "Cancel Order") : null;
+
+		if (cancel == null) {
+			return recovery(view, name, command);
+		}
+
+		return new Step("Click Cancel Order", name + " · then re-list at the new price", cancel.index(), false,
+				"");
 	}
 
 	private static Step slot(BazaarView view, String label, String detail) {

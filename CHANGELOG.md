@@ -3,6 +3,42 @@
 All notable changes to BzAssist. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project uses [semantic versioning](https://semver.org/).
 
+## [1.3.0] - 2026-11-24
+
+A full pass over the session machine and the order reader. The theme is the same everywhere: the
+assistant now keeps moving instead of settling on one order.
+
+### Fixed
+
+- **The session never came back from PLACE.** One product filled the whole run. It now clears the plan
+  the moment Hypixel confirms the order in chat and moves straight to the next product, remembers what it
+  placed so the same item cannot be picked twice before the list is re-read, counts those placements
+  against the order-slot budget, and goes back to a full scan after two minutes or as soon as a claim
+  lands. That is what makes it place several buy orders for several items instead of one.
+- **Claiming items out of a buy order is read from chat** (`Claimed 6x Null Atom worth …, bought for …`).
+  Claimed units are tracked, and the `bought for` figure gives stock ordered before the session a real
+  cost basis instead of leaving those sales as "no cost basis" revenue.
+- **No more "claim" on a sell offer.** Only a buy order holds items waiting; a sell offer holds ours.
+  The old test offered a claim on any row that mentioned claiming.
+- **Cancelling is the game's two clicks**: click the order row, then `Cancel Order`. The guide said
+  "right-click to cancel" — a flow that does not exist — and the moment the row was open it replaced the
+  step with "Click Go Back", which is why a relist pass looked like it saw nothing.
+- An order screen opened by hand is only offered for cancellation when it is the row the guide sent you
+  to, so an order you are merely looking at can never be suggested for cancelling.
+- **The sell phase no longer plans a fresh position.** A sell-only plan lists exactly the units in the
+  bag, and the custom-amount sign fills in the held count; before, it planned a new position and could
+  ask for more of the same item to be bought instead of listing what was already there.
+- A sell offer's chat figure is what you earn after tax, but the daily limit is charged on the order
+  value, so the gross is reconstructed before it is counted.
+- `Claimed … at 1.8 coins each` parses. The word `coins` between the price and `each` used to be
+  swallowed into the item name.
+- `/bz Sell Offer`-style commands cannot be produced: a term is only typed when it resolves to that exact
+  product, then the full display name, then bare `/bz`.
+- `/bzassist orders` reads the screen in front of you rather than the last session's snapshot, and prints
+  the side and parsed price of rows it cannot identify.
+- The stash step gives up on a stack after 30 seconds instead of leaving the player on one slot forever.
+- The HUD's session profit and clock restart with the session, not with the game.
+
 ## [1.2.9] - 2026-11-24
 
 ### Fixed

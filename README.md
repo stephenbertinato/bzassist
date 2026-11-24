@@ -17,9 +17,11 @@ what is highlighted. That is deliberate: it keeps your account safe and keeps yo
 - **Guides the clicks**: `/bzassist plan <item>` highlights the exact slot for each step — create the
   buy order, open `Custom Amount` (the sign is pre-filled with the amount), pick `Top Order +0.1`,
   confirm; then claim, `Create Sell Offer`, `Best Offer -0.1`, confirm.
-- **Runs a session** (F6): scans `/managebazaarorders`, finds orders that have been outbid or undercut,
-  decides whether relisting is worth the limit it costs, collects the stash, lists what has filled, and
-  places the next order.
+- **Runs a session** (F6) as one continuous loop: read `/managebazaarorders`, cancel and re-list whatever
+  is no longer at the front of the book, collect the stash, list what has filled, then place the next buy
+  order. The moment Hypixel confirms an order in chat it moves to the next product, and it remembers what
+  it placed so one item cannot take two slots. Every two minutes — or as soon as a claim lands — it goes
+  back to re-read the order list. It keeps cycling until you stop it or the daily limit runs out.
 - **Shows a HUD**: one wide rounded card at the top centre with the current step, profit per hour, and
   a six-column row of `PROFIT/H  LIMIT  CYCLE  SLOTS  SESSION  TIME`. Only on SkyBlock, and only while
   there is a step.
